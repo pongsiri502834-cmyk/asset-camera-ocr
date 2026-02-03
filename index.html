@@ -11,14 +11,10 @@
 body { margin:0; background:#000; font-family:Arial; }
 video { width:100vw; height:100vh; object-fit:cover; }
 
-#scanBox {
+#tapBox {
   position:fixed;
-  top:30%;
-  left:10%;
-  width:80%;
-  height:20%;
   border:3px solid #00ff88;
-  box-sizing:border-box;
+  pointer-events:none;
 }
 
 #status {
@@ -32,46 +28,63 @@ video { width:100vw; height:100vh; object-fit:cover; }
   position:fixed; bottom:0; width:100%;
   background:rgba(0,0,0,.85);
   color:#00ff88; padding:12px;
-  font-size:16px; max-height:45%;
-  overflow:auto;
+  font-size:16px;
 }
 </style>
 </head>
 
 <body>
 
-<div id="status">โหลดข้อมูล…</div>
+<div id="status">แตะที่ “เลขสินทรัพย์” บนจอ</div>
 <video id="video" autoplay playsinline></video>
-<div id="scanBox"></div>
-<div id="overlay">วางป้ายให้อยู่ในกรอบ</div>
+<div id="tapBox"></div>
+<div id="overlay">รอการแตะ…</div>
 
 <script>
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const status = document.getElementById("status");
+const box = document.getElementById("tapBox");
 
 let locked = false;
+let roi = null;
 
 /* ===== เปิดกล้อง ===== */
 navigator.mediaDevices.getUserMedia({
   video:{ facingMode:"environment" }
-}).then(s=>{
-  video.srcObject = s;
-  status.innerText = "กล้องพร้อมใช้งาน";
+}).then(s => video.srcObject = s);
+
+/* ===== แตะเพื่อกำหนดจุด OCR ===== */
+document.body.addEventListener("click", e => {
+  if (locked) return;
+
+  const size = 200;
+  roi = {
+    x: e.clientX - size/2,
+    y: e.clientY - size/2,
+    w: size,
+    h: size
+  };
+
+  box.style.left = roi.x+"px";
+  box.style.top  = roi.y+"px";
+  box.style.width = roi.w+"px";
+  box.style.height= roi.h+"px";
+
+  overlay.innerText = "กำลังอ่านเลขจากจุดที่แตะ…";
 });
 
 /* ===== OCR Loop ===== */
 setInterval(async () => {
-  if (locked || video.videoWidth === 0) return;
+  if (!roi || locked || video.videoWidth === 0) return;
 
   const vw = video.videoWidth;
   const vh = video.videoHeight;
 
-  // 🔥 crop เฉพาะกรอบกลาง
-  const sx = vw * 0.10;
-  const sy = vh * 0.30;
-  const sw = vw * 0.80;
-  const sh = vh * 0.20;
+  const sx = roi.x / window.innerWidth  * vw;
+  const sy = roi.y / window.innerHeight * vh;
+  const sw = roi.w / window.innerWidth  * vw;
+  const sh = roi.h / window.innerHeight * vh;
 
   const canvas = document.createElement("canvas");
   canvas.width = sw;
@@ -79,8 +92,41 @@ setInterval(async () => {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
-  // 🔥 แปลงเป็นขาวดำ + เพิ่ม contrast
+  /* ===== แปลงภาพแรง ๆ เพื่อเลข ===== */
   const img = ctx.getImageData(0,0,sw,sh);
   for(let i=0;i<img.data.length;i+=4){
-    const avg = (img.data[i]+img.data[i+1]+img.data[i+2])/3;
-    const v = avg > 1
+    const r = img.data[i];
+    const g = img.data[i+1];
+    const b = img.data[i+2];
+
+    // ดึงตัวอักษรสีเข้มบนพื้นเขียว
+    const v = (g > 120 && r < 120) ? 255 : 0;
+    img.data[i]=img.data[i+1]=img.data[i+2]=v;
+  }
+  ctx.putImageData(img,0,0);
+
+  const ocr = await Tesseract.recognize(canvas,"eng",{
+    tessedit_char_whitelist:"0123456789",
+    classify_bln_numeric_mode:1
+  });
+
+  const raw = ocr.data.text || "";
+  const matches = raw.match(/\d{8,}/g) || [];
+
+  overlay.innerHTML =
+    "<b>OCR:</b><br>"+raw+
+    "<br><br><b>เลขที่พบ:</b><br>"+
+    (matches.join("<br>")||"-");
+
+  if (matches.length) {
+    locked = true;
+    overlay.innerHTML =
+      "✅ พบเลขสินทรัพย์<br><br><b>"+matches[0]+"</b>";
+    status.innerText = "ล็อกผลแล้ว";
+  }
+
+}, 1200);
+</script>
+
+</body>
+</html>
