@@ -1,45 +1,52 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asset Camera OCR</title>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
 <style>
-  body { margin:0; font-family:Arial; background:#000 }
-  video { width:100vw; height:100vh; object-fit:cover }
+  body { margin:0; font-family: Arial; background:#000; }
+  video { width:100vw; height:100vh; object-fit:cover; }
   #overlay {
     position:fixed;
-    bottom:0; left:0;
+    bottom:0;
     width:100%;
     background:rgba(0,0,0,0.75);
-    color:#fff;
-    padding:12px;
+    color:#0f0;
+    padding:10px;
     font-size:16px;
+    max-height:45%;
+    overflow:auto;
   }
 </style>
 </head>
 
 <body>
+
 <video id="video" autoplay playsinline></video>
-<div id="overlay">เล็งกล้องไปที่เลขสินทรัพย์…</div>
+<div id="overlay">กำลังเปิดกล้อง...</div>
 
 <script>
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 
-// ===== ตัวอย่างข้อมูล (เดี๋ยวค่อยผูก Google Sheet จริง) =====
+// 🔹 ตัวอย่างข้อมูลสินทรัพย์ (เปลี่ยนเป็น Google Sheet ภายหลังได้)
 const ASSETS = {
-  "501006560-0000": "NOTEBOOK HP 245 G9 | มูลค่า 30,096 บาท",
-  "501010460-0000": "NOTEBOOK ACER TMP216 | มูลค่า 29,168 บาท"
+  "510486897-0": "กล้องถ่ายภาพ FUJI | มูลค่า 6,490 บาท",
+  "501006560-0000": "NOTEBOOK HP 245 G9 | มูลค่า 30,096 บาท"
 };
 
-// เปิดกล้องหลัง
+// 🔹 เปิดกล้องหลัง
 navigator.mediaDevices.getUserMedia({
   video: { facingMode: "environment" }
 }).then(stream => {
   video.srcObject = stream;
 });
 
-// OCR ทุก 2 วินาที
+// 🔹 OCR ทุก 2 วินาที
 setInterval(async () => {
   if (video.videoWidth === 0) return;
 
@@ -48,17 +55,28 @@ setInterval(async () => {
   canvas.height = video.videoHeight;
   canvas.getContext("2d").drawImage(video, 0, 0);
 
-  const { data } = await Tesseract.recognize(canvas, "eng");
-  const text = data.text.replace(/\s/g, "");
+  const result = await Tesseract.recognize(canvas, "eng");
+  const rawText = result.data.text;
 
+  // แสดงข้อความ OCR
+  overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
+
+  // ทำความสะอาดข้อความ เหลือแต่ตัวเลข
+  const cleanText = rawText.replace(/[^0-9]/g, "");
+
+  // เทียบกับข้อมูลสินทรัพย์
   Object.keys(ASSETS).forEach(code => {
-    const cleanCode = code.replace("-", "");
-    if (text.includes(cleanCode)) {
-      overlay.innerHTML = "📦 " + ASSETS[code];
+    const cleanCode = code.replace(/[^0-9]/g, "");
+    if (cleanText.includes(cleanCode)) {
+      overlay.innerHTML =
+        "✅ พบข้อมูล<br>" +
+        "รหัส: " + code + "<br>" +
+        ASSETS[code];
     }
   });
 
 }, 2000);
 </script>
+
 </body>
 </html>
