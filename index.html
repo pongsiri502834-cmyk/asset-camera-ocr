@@ -1,79 +1,140 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Asset Camera OCR</title>
 
+<!-- OCR Library -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
-  body { margin:0; font-family: Arial; background:#000; }
+  body { margin:0; font-family: Arial, sans-serif; background:#000; }
   video { width:100vw; height:100vh; object-fit:cover; }
   #overlay {
     position:fixed;
     bottom:0;
     width:100%;
-    background:rgba(0,0,0,0.75);
-    color:#0f0;
-    padding:10px;
+    background:rgba(0,0,0,0.78);
+    color:#00ff88;
+    padding:12px;
     font-size:16px;
     max-height:45%;
     overflow:auto;
+    box-sizing:border-box;
+  }
+  #status {
+    position:fixed;
+    top:0;
+    width:100%;
+    background:rgba(0,0,0,0.6);
+    color:#fff;
+    padding:6px 10px;
+    font-size:14px;
+    box-sizing:border-box;
   }
 </style>
 </head>
 
 <body>
 
+<div id="status">กำลังเริ่มต้น…</div>
 <video id="video" autoplay playsinline></video>
-<div id="overlay">กำลังเปิดกล้อง...</div>
+<div id="overlay">รอการอ่านจากกล้อง…</div>
 
 <script>
-const video = document.getElementById("video");
+const video   = document.getElementById("video");
 const overlay = document.getElementById("overlay");
+const status  = document.getElementById("status");
 
-// 🔹 ตัวอย่างข้อมูลสินทรัพย์ (เปลี่ยนเป็น Google Sheet ภายหลังได้)
-const ASSETS = {
-  "510486897-0": "กล้องถ่ายภาพ FUJI | มูลค่า 6,490 บาท",
-  "501006560-0000": "NOTEBOOK HP 245 G9 | มูลค่า 30,096 บาท"
-};
+// =======================
+// 1) ตั้งค่า Google Sheet
+// =======================
+// 🔴 วาง URL CSV ของคุณตรงนี้ (ต้องลงท้ายด้วย pub?output=csv)
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-// 🔹 เปิดกล้องหลัง
+// โครงสร้างเก็บข้อมูลจาก Sheet
+// key = คอลัมน์ B (รหัสสินทรัพย์)
+// value = HTML สำหรับแสดงผล
+let ASSETS = {};
+
+// =======================
+// 2) โหลดข้อมูลจาก Sheet
+// =======================
+fetch(SHEET_URL)
+  .then(res => res.text())
+  .then(csv => {
+    const rows = csv.split("\n").slice(1); // ข้ามหัวตาราง
+    rows.forEach(r => {
+      // แยกคอลัมน์แบบง่าย (เหมาะกับข้อมูลทั่วไป)
+      const c = r.split(",");
+
+      const code = (c[1] || "").trim(); // 🔑 คอลัมน์ B = รหัสสินทรัพย์
+
+      if (code) {
+        ASSETS[code] = `
+          <b>รหัส:</b> ${code}<br>
+          <b>รายละเอียด:</b> ${c[3] || "-"}<br>
+          <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
+          <b>หมายเลขผลิต:</b> ${c[6] || "-"}<br>
+          <b>วันที่ได้มา:</b> ${c[7] || "-"}<br>
+          <b>มูลค่า:</b> ${c[8] || "-"} บาท<br>
+          <b>สถานะ:</b> ${c[11] || "-"}
+        `;
+      }
+    });
+    status.innerText = "โหลดข้อมูลจาก Google Sheet เรียบร้อย";
+  })
+  .catch(err => {
+    status.innerText = "โหลดข้อมูลจาก Google Sheet ไม่สำเร็จ";
+    console.error(err);
+  });
+
+// =======================
+// 3) เปิดกล้องหลัง
+// =======================
 navigator.mediaDevices.getUserMedia({
   video: { facingMode: "environment" }
 }).then(stream => {
   video.srcObject = stream;
+  status.innerText = "กล้องพร้อมใช้งาน";
+}).catch(err => {
+  status.innerText = "ไม่สามารถเปิดกล้องได้";
+  console.error(err);
 });
 
-// 🔹 OCR ทุก 2 วินาที
+// =======================
+// 4) OCR ทุก 2 วินาที
+// =======================
 setInterval(async () => {
   if (video.videoWidth === 0) return;
 
   const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
+  canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext("2d").drawImage(video, 0, 0);
 
-  const result = await Tesseract.recognize(canvas, "eng");
-  const rawText = result.data.text;
+  try {
+    const ocr = await Tesseract.recognize(canvas, "eng");
+    const rawText = ocr.data.text || "";
 
-  // แสดงข้อความ OCR
-  overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
+    // แสดงสิ่งที่ OCR อ่านได้ (เพื่อ debug)
+    overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
 
-  // ทำความสะอาดข้อความ เหลือแต่ตัวเลข
-  const cleanText = rawText.replace(/[^0-9]/g, "");
+    // ล้างให้เหลือเฉพาะตัวเลข
+    const cleanText = rawText.replace(/[^0-9]/g, "");
 
-  // เทียบกับข้อมูลสินทรัพย์
-  Object.keys(ASSETS).forEach(code => {
-    const cleanCode = code.replace(/[^0-9]/g, "");
-    if (cleanText.includes(cleanCode)) {
-      overlay.innerHTML =
-        "✅ พบข้อมูล<br>" +
-        "รหัส: " + code + "<br>" +
-        ASSETS[code];
-    }
-  });
+    // เทียบกับคอลัมน์ B
+    Object.keys(ASSETS).forEach(code => {
+      const cleanCode = code.replace(/[^0-9]/g, "");
+      if (cleanCode && cleanText.includes(cleanCode)) {
+        overlay.innerHTML = "✅ พบข้อมูล<br>" + ASSETS[code];
+      }
+    });
+
+  } catch (e) {
+    console.error(e);
+  }
 
 }, 2000);
 </script>
