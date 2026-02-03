@@ -11,29 +11,32 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
 <style>
+  :root {
+    --accent: #00ff88;
+  }
   body { margin:0; font-family: Arial, system-ui, sans-serif; background:#000; color:#fff; }
   video { width:100vw; height:100vh; object-fit:cover; display:block; }
 
   #status {
-    position:fixed; top:0; left:0; right:0;
+    position:fixed; top:0; left:0; right:0; z-index:10;
     background:rgba(0,0,0,.7); color:#fff;
-    padding:8px 12px; font-size:14px; z-index:10;
+    padding:8px 12px; font-size:14px;
   }
 
   #overlay {
-    position:fixed; bottom:0; left:0; right:0;
-    background:rgba(0,0,0,.85); color:#00ff88;
+    position:fixed; bottom:0; left:0; right:0; z-index:10;
+    background:rgba(0,0,0,.85); color:var(--accent);
     padding:10px; font-size:15px; max-height:45%;
-    overflow:auto; z-index:10;
+    overflow:auto;
   }
 
   #toolbar {
-    position:fixed; top:40px; right:10px; z-index:11;
+    position:fixed; top:44px; right:10px; z-index:11;
     display:flex; gap:8px; flex-wrap:wrap;
   }
   .btn {
     background:rgba(0,0,0,.6);
-    color:#fff; border:1px solid #00ff88; border-radius:6px;
+    color:#fff; border:1px solid var(--accent); border-radius:6px;
     padding:6px 10px; font-size:14px; cursor:pointer;
   }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
@@ -49,34 +52,42 @@
     width:60vw; height:30vh;            /* ปรับพื้นที่สแกนหลักได้ */
     border:2px dashed rgba(0,255,136,.9);
     box-shadow:
-      0 0 0 9999px rgba(0,0,0,.35) inset, /* ทำให้รอบนอกมืดลง */
+      0 0 0 9999px rgba(0,0,0,.35) inset,
       0 0 12px rgba(0,255,136,.5);
     border-radius:8px;
   }
 
-  .small {
-    color:#ccc; font-size:12px;
-  }
+  .small { color:#ccc; font-size:12px; }
+  .muted { color:#bbb; }
+  ul.asset-list { margin:6px 0 0 18px; padding:0; }
+  ul.asset-list li { margin-bottom:10px; }
+  .hr { height:1px; border:0; background:rgba(255,255,255,.1); margin:8px 0; }
 </style>
 </head>
 
 <body>
   <div id="status">กำลังโหลดข้อมูล…</div>
+
   <div id="toolbar">
     <button id="btnToggleTorch" class="btn" disabled>🔦 เปิดไฟฉาย</button>
     <button id="btnUnlock" class="btn" disabled>🔁 สแกนใหม่</button>
   </div>
+
   <div class="roi" aria-hidden="true"></div>
 
   <video id="video" autoplay playsinline></video>
+
   <div id="overlay">รอการสแกน…</div>
 
   <!-- เสียงติ๊งเมื่อพบ -->
   <audio id="ding" preload="auto">
-    <source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3" type="audio/mpeg">
+    <source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3" type="audio/mpeg" />
   </audio>
 
 <script>
+/* ==============================
+   DOM refs
+   ============================== */
 const video   = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const statusEl  = document.getElementById("status");
@@ -90,7 +101,59 @@ const ding = document.getElementById("ding");
 const SHEET_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-const ASSETS = new Map(); // ใช้ Map เพื่อค้นหาง่ายและชัดเจน
+/* เก็บสองแบบ: รหัสเต็ม และ "เลขฐาน" (8–9 หลัก) */
+const ASSETS_FULL = new Map();           // key: รหัสเต็มในชีต เช่น "510368809-0000"
+const ASSETS_BASE = new Map();           // key: เลขฐาน เช่น "510368809" -> Array ของรายการที่ตรง
+                                         // เผื่อเลขฐานเดียวอาจมีหลายรายการ
+
+/* โครงข้อมูลเพื่อความชัด */
+function makeAsset(row) {
+  return {
+    codeFull: (row.codeFull ?? "-"),
+    detail:   (row.detail   ?? "-"),
+    brand:    (row.brand    ?? "-"),
+    serial:   (row.serial   ?? "-"),
+    gotDate:  (row.gotDate  ?? "-"),
+    price:    (row.price    ?? "-"),
+    status:   (row.status   ?? "-")
+  };
+}
+
+/* ==============================
+   Utils
+   ============================== */
+function escapeHTML(str) {
+  return (str ?? "").toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+/** ดึง "เลขฐาน" 8–9 หลักจากสตริงใดๆ
+ *  ตัวอย่าง:
+ *   "510368809-0000"  -> "510368809"
+ *   "510368809 0"     -> "510368809"
+ *   "AS-510368809-0"  -> "510368809"
+ */
+function normalizeBase(str) {
+  const s = (str ?? "").toString();
+  const m = s.match(/\d{8,9}/);
+  return m ? m[0] : "";
+}
+
+function assetToHTML(a) {
+  return `
+    <b>รหัส:</b> ${escapeHTML(a.codeFull)}<br>
+    <b>รายละเอียด:</b> ${escapeHTML(a.detail)}<br>
+    <b>ยี่ห้อ:</b> ${escapeHTML(a.brand)}<br>
+    <b>หมายเลขผลิต:</b> ${escapeHTML(a.serial)}<br>
+    <b>วันที่ได้มา:</b> ${escapeHTML(a.gotDate)}<br>
+    <b>มูลค่า:</b> ${escapeHTML(a.price)} บาท<br>
+    <b>สถานะ:</b> ${escapeHTML(a.status)}
+  `;
+}
 
 /* ==============================
    2) โหลดข้อมูลจาก Sheet (ทน CSV ที่ซับซ้อน)
@@ -101,7 +164,6 @@ async function loadSheet() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const text = await res.text();
 
-    // PapaParse จะ handle เครื่องหมายคำพูด/คอมม่า/บรรทัดว่าง
     const parsed = Papa.parse(text, {
       header: false,
       skipEmptyLines: true
@@ -111,33 +173,27 @@ async function loadSheet() {
     for (let i = 1; i < parsed.data.length; i++) {
       const c = parsed.data[i];
 
-      // ป้องกัน index ไม่มี
-      const colB = ((c[1] ?? "") + "").trim(); // คอลัมน์ B เช่น 510452225-0000
-      const short = colB.match(/\d{8,9}/)?.[0];
-      if (!short) continue;
+      const colB   = ((c[1] ?? "") + "").trim(); // รหัสเต็มในชีต เช่น "510368809-0000"
+      const base   = normalizeBase(colB);        // -> "510368809"
+      if (!base) continue;
 
-      // เตรียมคอลัมน์ที่ใช้งาน (กันไม่มีด้วย ?? "-")
-      const detail  = (c[3] ?? "-").toString().trim();
-      const brand   = (c[5] ?? "-").toString().trim();
-      const serial  = (c[6] ?? "-").toString().trim();
-      const gotDate = (c[7] ?? "-").toString().trim();
-      const price   = (c[8] ?? "-").toString().trim();
-      const status  = (c[11] ?? "-").toString().trim();
+      const data = makeAsset({
+        codeFull: colB,
+        detail:   (c[3] ?? "").toString().trim(),
+        brand:    (c[5] ?? "").toString().trim(),
+        serial:   (c[6] ?? "").toString().trim(),
+        gotDate:  (c[7] ?? "").toString().trim(),
+        price:    (c[8] ?? "").toString().trim(),
+        status:   (c[11] ?? "").toString().trim()
+      });
 
-      const html = `
-        <b>รหัส:</b> ${escapeHTML(colB)}<br>
-        <b>รายละเอียด:</b> ${escapeHTML(detail)}<br>
-        <b>ยี่ห้อ:</b> ${escapeHTML(brand)}<br>
-        <b>หมายเลขผลิต:</b> ${escapeHTML(serial)}<br>
-        <b>วันที่ได้มา:</b> ${escapeHTML(gotDate)}<br>
-        <b>มูลค่า:</b> ${escapeHTML(price)} บาท<br>
-        <b>สถานะ:</b> ${escapeHTML(status)}
-      `;
+      ASSETS_FULL.set(colB, data);
 
-      ASSETS.set(short, html);
+      if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
+      ASSETS_BASE.get(base).push(data);
     }
 
-    statusEl.innerText = `โหลดข้อมูลเรียบร้อย • รายการ: ${ASSETS.size.toLocaleString()} ชิ้น`;
+    statusEl.innerText = `โหลดข้อมูลเรียบร้อย • รายการ: ${ASSETS_FULL.size.toLocaleString()} ชิ้น`;
   } catch (e) {
     console.error(e);
     statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ";
@@ -149,7 +205,6 @@ async function loadSheet() {
    ============================== */
 let currentStream = null;
 let track = null;
-let imageCapture = null;
 let torchOn = false;
 
 async function initCamera() {
@@ -169,17 +224,13 @@ async function initCamera() {
 
     track = stream.getVideoTracks()[0];
 
-    // ลองสร้าง ImageCapture เพื่อตรวจ Torch
+    // ตรวจความสามารถไฟฉาย
     try {
-      const trackSettings = track.getSettings?.() || {};
-      const trackCapabilities = track.getCapabilities?.() || {};
-      if ("torch" in trackCapabilities) {
-        imageCapture = new ImageCapture(track);
+      const caps = track.getCapabilities?.() || {};
+      if ("torch" in caps) {
         btnToggleTorch.disabled = false;
       }
-    } catch {
-      // ไม่รองรับไฟฉาย
-    }
+    } catch { /* เงียบไว้ */ }
   } catch (err) {
     console.error(err);
     statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + (err.message || err);
@@ -207,13 +258,11 @@ let worker;
 let workerReady = false;
 
 async function initOcr() {
+  // v5: createWorker(language, oem?, options?)
   worker = await Tesseract.createWorker("eng", 1, {
-    logger: m => {
-      // console.log(m);
-    }
+    logger: m => { /* console.log(m); */ }
   });
 
-  // จำกัดให้เน้นตัวเลข
   await worker.setParameters({
     tessedit_char_whitelist: "0123456789",
     classify_bln_numeric_mode: "1"
@@ -230,7 +279,7 @@ let lastRun = 0;
 const SCAN_INTERVAL_MS = 1200;
 
 function getRoiCanvas() {
-  // สร้าง canvas ตัดเฉพาะโซนกลางภาพ (60% x 30%) เพื่อความเร็วและความแม่นยำ
+  // สร้าง canvas ตัดเฉพาะโซนกลางภาพ (60% x 30%)
   const vw = video.videoWidth;
   const vh = video.videoHeight;
   if (!vw || !vh) return null;
@@ -250,17 +299,13 @@ function getRoiCanvas() {
   // วาดเฉพาะ ROI
   ctx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, roiW, roiH);
 
-  // ทำ pre-process เล็กน้อย: เพิ่มคอนทราสต์/ลดนอยส์ (ง่ายๆ)
+  // Pre-process: grayscale + เพิ่มคอนทราสต์เล็กน้อย
   const imgData = ctx.getImageData(0, 0, roiW, roiH);
   const d = imgData.data;
   for (let i = 0; i < d.length; i += 4) {
-    // แปลงเป็น grayscale
     const gray = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114) | 0;
-    // เพิ่มคอนทราสต์แบบง่าย
     const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.2 + 128));
-    const v = contrasted;
-    d[i] = d[i+1] = d[i+2] = v;
-    // alpha คงเดิม
+    d[i] = d[i+1] = d[i+2] = contrasted;
   }
   ctx.putImageData(imgData, 0, 0);
 
@@ -285,15 +330,23 @@ async function loopScan() {
     // แสดงตัวอย่างข้อความ OCR ที่อ่านได้
     overlay.innerHTML = `OCR อ่านได้:<br><span class="small">${escapeHTML(raw)}</span>`;
 
-    // ค้นหาเลขติดกัน 8–9 หลัก
-    const found = raw.match(/\d{8,9}/);
-    if (found) {
-      const code = found[0];
-
-      if (ASSETS.has(code)) {
+    // ดึง "เลขฐาน" จากข้อความ OCR (8–9 หลักแรกที่เจอ)
+    const base = normalizeBase(raw);
+    if (base) {
+      if (ASSETS_BASE.has(base)) {
         locked = true;
-        const html = ASSETS.get(code);
-        overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${html}`;
+        const items = ASSETS_BASE.get(base); // อาจมีหลายรายการ
+        if (items.length === 1) {
+          overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${assetToHTML(items[0])}`;
+        } else {
+          // แสดงหลายรายการในรูปแบบลิสต์
+          const lis = items.map(a => `<li>${assetToHTML(a)}</li>`).join("");
+          overlay.innerHTML = `
+            ✅ พบข้อมูลสินทรัพย์ ${items.length} รายการ ที่มีเลขฐาน ${escapeHTML(base)}
+            <div class="hr"></div>
+            <ul class="asset-list">${lis}</ul>
+          `;
+        }
 
         // สั่น + เสียง
         try { navigator.vibrate?.(120); } catch {}
@@ -301,7 +354,7 @@ async function loopScan() {
 
         btnUnlock.disabled = false;
       } else {
-        overlay.innerHTML = `⚠️ พบเลข ${escapeHTML(code)}<br>แต่ไม่พบในฐานข้อมูล`;
+        overlay.innerHTML = `⚠️ พบเลขฐาน ${escapeHTML(base)}<br>แต่ไม่พบในฐานข้อมูล`;
       }
     }
   } catch (e) {
@@ -318,18 +371,6 @@ btnUnlock.addEventListener("click", () => {
 
 // วนสแกนด้วย setInterval + guard time
 setInterval(loopScan, 200);
-
-/* ==============================
-   Utils
-   ============================== */
-function escapeHTML(str) {
-  return (str ?? "").toString()
-    .replace(/&/g, "&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;")
-    .replace(/'/g,"&#039;");
-}
 
 /* ==============================
    เริ่มทำงาน
