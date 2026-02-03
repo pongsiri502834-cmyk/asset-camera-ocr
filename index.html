@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+<style>
+  body { margin:0; font-family:Arial; background:#000 }
+  video { width:100vw; height:100vh; object-fit:cover }
+  #overlay {
+    position:fixed;
+    bottom:0; left:0;
+    width:100%;
+    background:rgba(0,0,0,0.75);
+    color:#fff;
+    padding:12px;
+    font-size:16px;
+  }
+</style>
+</head>
+
+<body>
+<video id="video" autoplay playsinline></video>
+<div id="overlay">เล็งกล้องไปที่เลขสินทรัพย์…</div>
+
+<script>
+const video = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+
+// ===== ตัวอย่างข้อมูล (เดี๋ยวค่อยผูก Google Sheet จริง) =====
+const ASSETS = {
+  "501006560-0000": "NOTEBOOK HP 245 G9 | มูลค่า 30,096 บาท",
+  "501010460-0000": "NOTEBOOK ACER TMP216 | มูลค่า 29,168 บาท"
+};
+
+// เปิดกล้องหลัง
+navigator.mediaDevices.getUserMedia({
+  video: { facingMode: "environment" }
+}).then(stream => {
+  video.srcObject = stream;
+});
+
+// OCR ทุก 2 วินาที
+setInterval(async () => {
+  if (video.videoWidth === 0) return;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+
+  const { data } = await Tesseract.recognize(canvas, "eng");
+  const text = data.text.replace(/\s/g, "");
+
+  Object.keys(ASSETS).forEach(code => {
+    const cleanCode = code.replace("-", "");
+    if (text.includes(cleanCode)) {
+      overlay.innerHTML = "📦 " + ASSETS[code];
+    }
+  });
+
+}, 2000);
+</script>
+</body>
+</html>
