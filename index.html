@@ -1,167 +1,144 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Asset Camera Scanner</title>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
-body {
-  margin: 0;
-  background: #000;
-  font-family: Arial, sans-serif;
-}
+  body { margin:0; font-family: Arial; background:#000; }
+  video { width:100vw; height:100vh; object-fit:cover; }
 
-video {
-  width: 100vw;
-  height: 100vh;
-  object-fit: cover;
-}
+  #status {
+    position:fixed;
+    top:0;
+    width:100%;
+    background:rgba(0,0,0,.7);
+    color:#fff;
+    padding:6px 10px;
+    font-size:14px;
+  }
 
-#status {
-  position: fixed;
-  top: 0;
-  width: 100%;
-  padding: 6px 10px;
-  background: rgba(0,0,0,0.7);
-  color: #fff;
-  font-size: 14px;
-  z-index: 10;
-}
-
-#overlay {
-  position: fixed;
-  bottom: 0;
-  width: 100%;
-  max-height: 45%;
-  overflow: auto;
-  background: rgba(0,0,0,0.85);
-  color: #00ff88;
-  padding: 12px;
-  box-sizing: border-box;
-  font-size: 16px;
-  z-index: 10;
-}
+  #overlay {
+    position:fixed;
+    bottom:0;
+    width:100%;
+    background:rgba(0,0,0,.85);
+    color:#00ff88;
+    padding:10px;
+    font-size:16px;
+    max-height:45%;
+    overflow:auto;
+  }
 </style>
 </head>
 
 <body>
 
-<div id="status">กำลังเริ่มต้น…</div>
+<div id="status">กำลังโหลดข้อมูล…</div>
 <video id="video" autoplay playsinline></video>
-<div id="overlay">รอการอ่านจากกล้อง…</div>
+<div id="overlay">รอการสแกน…</div>
 
 <script>
 const video   = document.getElementById("video");
-const status  = document.getElementById("status");
 const overlay = document.getElementById("overlay");
+const status  = document.getElementById("status");
 
-/* =========================
-   1) Google Sheet CSV URL
-   ========================= */
-const SHEET_URL = "PUT_YOUR_GOOGLE_SHEET_CSV_URL_HERE";
+/* ==============================
+   1) Google Sheet (CSV)
+   ============================== */
+const SHEET_URL =
+"https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-/* =========================
-   2) โหลดข้อมูลจาก Sheet
-   ใช้เลขล้วนเป็น KEY เท่านั้น
-   ========================= */
 let ASSETS = {};
 
+/* ==============================
+   2) โหลดข้อมูลจาก Sheet
+   ============================== */
 fetch(SHEET_URL)
-.then(r => r.text())
-.then(csv => {
-  const rows = csv.split(/\r?\n/).slice(1);
+  .then(r => r.text())
+  .then(csv => {
+    const rows = csv.split("\n").slice(1);
 
-  rows.forEach(r => {
-    if (!r.trim()) return;
-    const c = r.split(",");
+    rows.forEach(row => {
+      const c = row.split(",");
 
-    const cleanKey = (c[1] || "").replace(/\D/g, "");
+      // คอลัมน์ B เช่น 510452225-0000
+      const rawCode = (c[1] || "").trim();
 
-    if (cleanKey.length >= 8) {
-      ASSETS[cleanKey] = `
-        <b>รหัสสินทรัพย์:</b> ${cleanKey}<br>
-        <b>รายละเอียด:</b> ${c[3] || "-"}<br>
-        <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
-        <b>หมายเลข:</b> ${c[6] || "-"}<br>
-        <b>วันที่ได้มา:</b> ${c[7] || "-"}<br>
-        <b>มูลค่า:</b> ${c[8] || "-"} บาท<br>
-        <b>สถานะ:</b> ${c[11] || "-"}
-      `;
-    }
+      // ✅ ดึงเฉพาะเลขติดกัน 8–9 หลัก
+      const shortCode = rawCode.match(/\d{8,9}/)?.[0];
+
+      if (shortCode) {
+        ASSETS[shortCode] = `
+          <b>รหัส:</b> ${rawCode}<br>
+          <b>รายละเอียด:</b> ${c[3] || "-"}<br>
+          <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
+          <b>หมายเลขผลิต:</b> ${c[6] || "-"}<br>
+          <b>วันที่ได้มา:</b> ${c[7] || "-"}<br>
+          <b>มูลค่า:</b> ${c[8] || "-"} บาท<br>
+          <b>สถานะ:</b> ${c[11] || "-"}
+        `;
+      }
+    });
+
+    status.innerText = "โหลดข้อมูลเรียบร้อย";
+  })
+  .catch(() => {
+    status.innerText = "โหลด Google Sheet ไม่สำเร็จ";
   });
 
-  status.innerText = "โหลดข้อมูลแล้ว | กล้องพร้อมใช้งาน";
-})
-.catch(err => {
-  status.innerText = "โหลด Google Sheet ไม่สำเร็จ";
-  console.error(err);
-});
-
-/* =========================
-   3) เปิดกล้องหลัง
-   ========================= */
+/* ==============================
+   3) เปิดกล้อง
+   ============================== */
 navigator.mediaDevices.getUserMedia({
   video: { facingMode: "environment" }
-})
-.then(stream => {
+}).then(stream => {
   video.srcObject = stream;
-})
-.catch(err => {
-  status.innerText = "ไม่สามารถเปิดกล้องได้";
-  console.error(err);
+  status.innerText = "กล้องพร้อมใช้งาน";
 });
 
-/* =========================
-   4) OCR + ล็อกเมื่อเจอ
-   ========================= */
+/* ==============================
+   4) OCR (จับเลข ≥ 8 หลักเท่านั้น)
+   ============================== */
 let locked = false;
 
 setInterval(async () => {
-  if (locked) return;
-  if (video.videoWidth === 0) return;
+  if (locked || video.videoWidth === 0) return;
 
   const canvas = document.createElement("canvas");
   canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext("2d").drawImage(video, 0, 0);
 
-  try {
-    const result = await Tesseract.recognize(canvas, "eng", {
-      tessedit_char_whitelist: "0123456789",
-      classify_bln_numeric_mode: 1
-    });
+  const ocr = await Tesseract.recognize(canvas, "eng", {
+    tessedit_char_whitelist: "0123456789",
+    classify_bln_numeric_mode: 1
+  });
 
-    const rawText = result.data.text || "";
+  const rawText = ocr.data.text || "";
 
-    // 🔍 จับเฉพาะเลขเรียงกัน ≥ 8 หลัก
-    const matches = rawText.match(/\d{8,}/g);
+  // ดึงเลขที่ติดกันอย่างน้อย 8 หลัก
+  const found = rawText.match(/\d{8,9}/);
 
-    overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
+  overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
 
-    if (!matches) return;
+  if (found) {
+    const code = found[0];
 
-    for (const num of matches) {
-      if (ASSETS[num]) {
-        locked = true;
-        overlay.innerHTML =
-          "✅ <b>พบข้อมูลสินทรัพย์</b><br><br>" +
-          ASSETS[num];
-        status.innerText = "พบแล้ว | ล็อกการอ่าน";
-        return;
-      } else {
-        overlay.innerHTML =
-          "⚠️ พบเลข: " + num + "<br>แต่ไม่อยู่ในฐานข้อมูล";
-      }
+    if (ASSETS[code]) {
+      locked = true;
+      overlay.innerHTML =
+        "✅ พบข้อมูลสินทรัพย์<br><br>" + ASSETS[code];
+    } else {
+      overlay.innerHTML =
+        "⚠️ พบเลข " + code + "<br>แต่ไม่พบในฐานข้อมูล";
     }
-
-  } catch (e) {
-    console.error(e);
   }
 
-}, 2000);
+}, 1500);
 </script>
 
 </body>
