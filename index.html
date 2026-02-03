@@ -1,27 +1,33 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Asset Camera OCR</title>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
-  body { margin:0; font-family: Arial, sans-serif; background:#000; }
-  video { width:100vw; height:100vh; object-fit:cover; }
-
+  body {
+    margin:0;
+    background:#000;
+    font-family: Arial, sans-serif;
+  }
+  video {
+    width:100vw;
+    height:100vh;
+    object-fit:cover;
+  }
   #status {
     position:fixed;
     top:0;
     width:100%;
-    background:rgba(0,0,0,0.7);
+    background:rgba(0,0,0,0.6);
     color:#fff;
     padding:6px 10px;
     font-size:14px;
     z-index:10;
   }
-
   #overlay {
     position:fixed;
     bottom:0;
@@ -40,7 +46,7 @@
 
 <body>
 
-<div id="status">กำลังโหลดข้อมูล…</div>
+<div id="status">กำลังเริ่มต้น…</div>
 <video id="video" autoplay playsinline></video>
 <div id="overlay">รอการอ่านจากกล้อง…</div>
 
@@ -49,31 +55,27 @@ const video   = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const status  = document.getElementById("status");
 
-// =======================
-// 1) Google Sheet CSV
-// =======================
+/* =========================
+   1) ตั้งค่า Google Sheet
+   ========================= */
 const SHEET_URL =
 "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
 let ASSETS = {};
-let SHEET_READY = false;
 
-// =======================
-// 2) โหลดข้อมูลจาก Sheet
-// =======================
+/* =========================
+   2) โหลดข้อมูลจาก Sheet
+   ========================= */
 fetch(SHEET_URL)
   .then(res => res.text())
   .then(csv => {
-    const rows = csv.trim().split("\n").slice(1);
-
+    const rows = csv.split("\n").slice(1);
     rows.forEach(r => {
-      // ⚠️ CSV จริงของ Google Sheet ใช้ ,
       const c = r.split(",");
-
       const code = (c[1] || "").trim(); // คอลัมน์ B
 
       if (code) {
-        ASSETS[code.replace(/[^0-9]/g, "")] = `
+        ASSETS[code] = `
           <b>รหัส:</b> ${code}<br>
           <b>รายละเอียด:</b> ${c[3] || "-"}<br>
           <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
@@ -84,8 +86,6 @@ fetch(SHEET_URL)
         `;
       }
     });
-
-    SHEET_READY = true;
     status.innerText = "โหลดข้อมูลจาก Google Sheet เรียบร้อย";
   })
   .catch(err => {
@@ -93,31 +93,57 @@ fetch(SHEET_URL)
     console.error(err);
   });
 
-// =======================
-// 3) เปิดกล้องหลัง
-// =======================
+/* =========================
+   3) เปิดกล้องหลัง
+   ========================= */
 navigator.mediaDevices.getUserMedia({
-  video: { facingMode: { ideal: "environment" } }
-})
-.then(stream => {
+  video: { facingMode: "environment" }
+}).then(stream => {
   video.srcObject = stream;
-  status.innerText += " | กล้องพร้อมใช้งาน";
-})
-.catch(err => {
+  status.innerText = "กล้องพร้อมใช้งาน";
+}).catch(err => {
   status.innerText = "ไม่สามารถเปิดกล้องได้";
   console.error(err);
 });
 
-// =======================
-// 4) OCR ทุก 2 วินาที
-// =======================
+/* =========================
+   ฟังก์ชัน match แบบยืดหยุ่น
+   ========================= */
+function findAsset(cleanText) {
+  for (const key in ASSETS) {
+    const cleanKey = key.replace(/[^0-9]/g, "");
+    if (
+      cleanText.includes(cleanKey) ||
+      cleanText.includes(cleanKey.slice(-6)) ||
+      cleanKey.includes(cleanText)
+    ) {
+      return ASSETS[key];
+    }
+  }
+  return null;
+}
+
+/* =========================
+   4) OCR ทุก 2 วินาที
+   ========================= */
 setInterval(async () => {
-  if (!SHEET_READY || video.videoWidth === 0) return;
+  if (video.videoWidth === 0) return;
 
   const canvas = document.createElement("canvas");
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0);
+  const ctx = canvas.getContext("2d");
+
+  const w = video.videoWidth;
+  const h = video.videoHeight;
+
+  // crop เฉพาะกลางภาพ (ป้าย)
+  const cropW = w * 0.6;
+  const cropH = h * 0.3;
+  const sx = (w - cropW) / 2;
+  const sy = (h - cropH) / 2;
+
+  canvas.width = cropW;
+  canvas.height = cropH;
+  ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, cropW, cropH);
 
   try {
     const ocr = await Tesseract.recognize(canvas, "eng", {
@@ -126,19 +152,13 @@ setInterval(async () => {
     });
 
     const rawText = ocr.data.text || "";
-
-    // debug ให้เห็นชัด
     overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
 
-    // ล้างให้เหลือแต่ตัวเลข
     const cleanText = rawText.replace(/[^0-9]/g, "");
 
-    // เทียบกับรหัสสินทรัพย์
-    for (const key in ASSETS) {
-      if (cleanText.includes(key)) {
-        overlay.innerHTML = "✅ พบข้อมูล<br>" + ASSETS[key];
-        break;
-      }
+    const found = findAsset(cleanText);
+    if (found) {
+      overlay.innerHTML = "✅ พบข้อมูล<br>" + found;
     }
 
   } catch (e) {
