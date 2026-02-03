@@ -1,70 +1,61 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Asset Camera OCR</title>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
-  body { margin:0; background:#000; font-family:Arial; }
-  video { width:100vw; height:100vh; object-fit:cover; }
-  canvas { display:none; }
+body { margin:0; background:#000; font-family:Arial; }
+video { width:100vw; height:100vh; object-fit:cover; }
 
-  #roi {
-    position:fixed;
-    border:2px solid #00ff88;
-    pointer-events:none;
-  }
+#status {
+  position:fixed; top:0; width:100%;
+  background:rgba(0,0,0,.7);
+  color:#fff; padding:6px 10px;
+  font-size:14px;
+}
 
-  #status {
-    position:fixed; top:0; width:100%;
-    background:rgba(0,0,0,.65);
-    color:#fff; padding:6px 10px;
-    font-size:14px;
-  }
-
-  #overlay {
-    position:fixed; bottom:0; width:100%;
-    background:rgba(0,0,0,.8);
-    color:#00ff88; padding:12px;
-    font-size:16px; max-height:45%;
-    overflow:auto;
-  }
+#overlay {
+  position:fixed; bottom:0; width:100%;
+  background:rgba(0,0,0,.85);
+  color:#00ff88; padding:12px;
+  font-size:16px; max-height:45%;
+  overflow:auto;
+}
 </style>
 </head>
 
 <body>
 
-<div id="status">แตะที่เลขสินทรัพย์เพื่ออ่าน</div>
+<div id="status">กำลังโหลดข้อมูล…</div>
 <video id="video" autoplay playsinline></video>
-<div id="roi"></div>
-<div id="overlay">ยังไม่เริ่ม OCR</div>
+<div id="overlay">รอการอ่าน OCR</div>
 
 <script>
 const video   = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const status  = document.getElementById("status");
-const roiBox  = document.getElementById("roi");
 
+/* ================= Google Sheet ================= */
 const SHEET_URL =
 "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
 let ASSETS = {};
-let roi = null;
 let locked = false;
 
-/* ================= โหลด Google Sheet ================= */
+/* ================= โหลด Sheet ================= */
 fetch(SHEET_URL)
 .then(r => r.text())
 .then(csv => {
   csv.split("\n").slice(1).forEach(r => {
     const c = r.split(",");
-    const code = (c[1] || "").trim();
-    if (code) {
-      ASSETS[code.replace(/\D/g,"")] = `
-        <b>รหัส:</b> ${code}<br>
+    const code = (c[1] || "").replace(/\D/g,""); // คอลัมน์ B
+    if (code.length >= 8) {
+      ASSETS[code] = `
+        <b>รหัสสินทรัพย์:</b> ${c[1]}<br>
         <b>รายละเอียด:</b> ${c[3] || "-"}<br>
         <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
         <b>หมายเลข:</b> ${c[6] || "-"}<br>
@@ -74,7 +65,7 @@ fetch(SHEET_URL)
       `;
     }
   });
-  status.innerText = "โหลดข้อมูลแล้ว – แตะเพื่อเลือกตำแหน่ง";
+  status.innerText = "โหลดข้อมูลแล้ว – เปิดกล้อง";
 });
 
 /* ================= เปิดกล้อง ================= */
@@ -84,67 +75,40 @@ navigator.mediaDevices.getUserMedia({
   video.srcObject = s;
 });
 
-/* ================= แตะเพื่อเลือก ROI ================= */
-video.addEventListener("click", e=>{
-  if (locked) return;
-
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  const rect = video.getBoundingClientRect();
-
-  const x = (e.clientX - rect.left) / rect.width * vw;
-  const y = (e.clientY - rect.top)  / rect.height * vh;
-
-  roi = {
-    x: Math.max(x - 200, 0),
-    y: Math.max(y - 60, 0),
-    w: 400,
-    h: 120
-  };
-
-  roiBox.style.left = `${e.clientX-200}px`;
-  roiBox.style.top  = `${e.clientY-60}px`;
-  roiBox.style.width  = "400px";
-  roiBox.style.height = "120px";
-
-  status.innerText = "กำลังอ่านเลขในกรอบ…";
-});
-
 /* ================= OCR Loop ================= */
-setInterval(async ()=>{
-  if (!roi || locked || video.videoWidth === 0) return;
+setInterval(async () => {
+  if (locked || video.videoWidth === 0) return;
 
-  const c = document.createElement("canvas");
-  c.width = roi.w;
-  c.height = roi.h;
-  const ctx = c.getContext("2d");
+  const canvas = document.createElement("canvas");
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
 
-  ctx.drawImage(
-    video,
-    roi.x, roi.y, roi.w, roi.h,
-    0, 0, roi.w, roi.h
-  );
-
-  const ocr = await Tesseract.recognize(c, "eng", {
-    tessedit_char_whitelist:"0123456789",
-    classify_bln_numeric_mode:1
+  const ocr = await Tesseract.recognize(canvas, "eng", {
+    tessedit_char_whitelist: "0123456789",
+    classify_bln_numeric_mode: 1
   });
 
-  const raw = ocr.data.text || "";
-  const clean = raw.replace(/\D/g,"");
+  const rawText = ocr.data.text || "";
+
+  // 🔥 ดึงเฉพาะเลขที่เรียงกันตั้งแต่ 8 ตัวขึ้นไป
+  const matches = rawText.match(/\d{8,}/g) || [];
 
   overlay.innerHTML =
-    "OCR อ่านได้:<br>" + raw +
-    "<br><br>Clean:<br>" + clean;
+    "<b>OCR อ่านได้:</b><br>" + rawText +
+    "<br><br><b>เลขที่เข้าเงื่อนไข (≥8):</b><br>" +
+    (matches.join("<br>") || "-");
 
-  if (ASSETS[clean]) {
-    locked = true;
-    overlay.innerHTML = "✅ พบข้อมูลแล้ว<br><br>" + ASSETS[clean];
-    status.innerText = "ล็อกผลแล้ว";
-    roiBox.style.border = "3px solid red";
+  for (const num of matches) {
+    if (ASSETS[num]) {
+      locked = true;
+      overlay.innerHTML = "✅ พบข้อมูลแล้ว<br><br>" + ASSETS[num];
+      status.innerText = "ล็อกผลแล้ว";
+      break;
+    }
   }
 
-}, 1200);
+}, 1500);
 </script>
 
 </body>
