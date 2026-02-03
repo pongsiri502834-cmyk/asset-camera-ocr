@@ -3,27 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Asset Camera OCR</title>
+<title>Asset Camera Tap Scan</title>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
-body{margin:0;background:#000;font-family:Arial}
-video{width:100vw;height:100vh;object-fit:cover}
+body { margin:0; background:#000; font-family:Arial }
+video { width:100vw; height:100vh; object-fit:cover }
 
-#overlay{
-  position:fixed;bottom:0;width:100%;
-  background:rgba(0,0,0,.8);color:#00ff88;
-  padding:12px;font-size:16px;
+#status {
+  position:fixed; top:0; width:100%;
+  background:rgba(0,0,0,.65);
+  color:#fff; padding:6px 10px;
 }
 
-#status{
-  position:fixed;top:0;width:100%;
-  background:rgba(0,0,0,.6);color:#fff;
-  padding:6px 10px;font-size:14px;
+#overlay {
+  position:fixed; bottom:0; width:100%;
+  background:rgba(0,0,0,.8);
+  color:#00ff88; padding:12px;
+  min-height:90px;
 }
 
-#box{
+#box {
   position:fixed;
   border:2px solid #00ff88;
   display:none;
@@ -34,10 +35,10 @@ video{width:100vw;height:100vh;object-fit:cover}
 
 <body>
 
-<div id="status">กำลังโหลดข้อมูล…</div>
+<div id="status">แตะป้ายสินทรัพย์เพื่อเริ่มอ่าน</div>
 <video id="video" autoplay playsinline></video>
 <div id="box"></div>
-<div id="overlay">รอ OCR…</div>
+<div id="overlay">ยังไม่เริ่มอ่าน</div>
 
 <script>
 const video = document.getElementById("video");
@@ -45,76 +46,97 @@ const overlay = document.getElementById("overlay");
 const status  = document.getElementById("status");
 const box     = document.getElementById("box");
 
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
-
 let ASSETS = {};
-let LOCKED = false;
+let locked = false;
 
-/* ------------------ โหลด Google Sheet ------------------ */
+// =======================
+// Google Sheet
+// =======================
+const SHEET_URL =
+"https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?output=csv";
+
 fetch(SHEET_URL)
-.then(r=>r.text())
-.then(csv=>{
-  csv.split("\n").slice(1).forEach(row=>{
-    const c = row.split(",");
-    const rawCode = (c[1]||"").replace(/\D/g,""); // ⭐ เก็บเลขล้วน
-    if(rawCode.length>=8){
-      ASSETS[rawCode] = `
-        <b>รหัส:</b> ${rawCode}<br>
-        <b>รายการ:</b> ${c[3]||"-"}<br>
-        <b>ยี่ห้อ:</b> ${c[5]||"-"}<br>
-        <b>Serial:</b> ${c[6]||"-"}<br>
-        <b>วันที่:</b> ${c[7]||"-"}<br>
-        <b>มูลค่า:</b> ${c[8]||"-"} บาท<br>
-        <b>สถานะ:</b> ${c[11]||"-"}
-      `;
-    }
+  .then(r => r.text())
+  .then(csv => {
+    csv.split("\n").slice(1).forEach(r => {
+      const c = r.split(",");
+      const code = (c[1]||"").trim();
+      if(code){
+        ASSETS[code.replace(/\D/g,"")] = `
+<b>รหัส:</b> ${code}<br>
+<b>รายการ:</b> ${c[3]||"-"}<br>
+<b>มูลค่า:</b> ${c[8]||"-"} บาท<br>
+<b>สถานะ:</b> ${c[11]||"-"}
+`;
+      }
+    });
+    status.innerText = "แตะป้ายสินทรัพย์เพื่อเริ่มอ่าน";
   });
-  status.innerText="โหลดข้อมูลเรียบร้อย";
+
+// =======================
+// Camera
+// =======================
+navigator.mediaDevices.getUserMedia({
+  video:{facingMode:"environment"}
+}).then(s=>{
+  video.srcObject=s;
 });
 
-/* ------------------ เปิดกล้อง ------------------ */
-navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
-.then(s=>video.srcObject=s);
+// =======================
+// Tap to Scan
+// =======================
+video.addEventListener("click", async (e) => {
+  if(locked) return;
 
-/* ------------------ OCR Loop ------------------ */
-setInterval(async()=>{
-  if(video.videoWidth===0 || LOCKED) return;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const rect = video.getBoundingClientRect();
 
-  const canvas=document.createElement("canvas");
-  canvas.width=video.videoWidth;
-  canvas.height=video.videoHeight;
-  canvas.getContext("2d").drawImage(video,0,0);
+  const x = (e.clientX - rect.left) / rect.width * vw;
+  const y = (e.clientY - rect.top)  / rect.height * vh;
 
-  const res = await Tesseract.recognize(canvas,"eng",{
+  const w = vw * 0.45;
+  const h = vh * 0.25;
+
+  // draw box
+  box.style.display="block";
+  box.style.left = (e.clientX - w/2/ vw * rect.width) + "px";
+  box.style.top  = (e.clientY - h/2/ vh * rect.height) + "px";
+  box.style.width  = (w / vw * rect.width) + "px";
+  box.style.height = (h / vh * rect.height) + "px";
+
+  status.innerText = "กำลังอ่าน…";
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, x-w/2, y-h/2, w, h, 0, 0, w, h);
+
+  const ocr = await Tesseract.recognize(canvas, "eng", {
     tessedit_char_whitelist:"0123456789",
     classify_bln_numeric_mode:1
   });
 
-  const text = res.data.text;
-  const matches = text.match(/\d{8,}/g); // ⭐ เลขติดกัน >=8
+  const text = ocr.data.text.replace(/\D/g,"");
+  overlay.innerHTML = "OCR: " + text;
 
-  overlay.innerHTML = "OCR อ่านได้:<br>"+text;
-
-  if(!matches) return;
-
-  for(const m of matches){
-    if(ASSETS[m]){
-      LOCKED=true;
-      overlay.innerHTML="✅ พบข้อมูล<br>"+ASSETS[m];
-
-      // วาดกรอบตำแหน่ง
-      const w = res.data.words.find(x=>x.text.includes(m));
-      if(w){
-        box.style.display="block";
-        box.style.left = (w.bbox.x0/window.devicePixelRatio)+"px";
-        box.style.top  = (w.bbox.y0/window.devicePixelRatio)+"px";
-        box.style.width  = (w.bbox.x1-w.bbox.x0)+"px";
-        box.style.height = (w.bbox.y1-w.bbox.y0)+"px";
-      }
-      break;
+  const match = text.match(/\d{8,}/);
+  if(match){
+    const code = match[0];
+    if(ASSETS[code]){
+      locked = true;
+      overlay.innerHTML = "✅ พบข้อมูล<br>" + ASSETS[code];
+      status.innerText = "ล็อกแล้ว (แตะรีเฟรชเพื่ออ่านใหม่)";
+    }else{
+      overlay.innerHTML = "❌ ไม่พบรหัส " + code;
     }
+  }else{
+    overlay.innerHTML = "❌ ไม่พบตัวเลข 8 หลักขึ้นไป";
   }
-},1500);
+});
+
+// reset on refresh
 </script>
 
 </body>
