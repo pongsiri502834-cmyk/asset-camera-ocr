@@ -5,140 +5,341 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Asset Camera Scanner</title>
 
+<!-- Tesseract.js v5 -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<!-- PapaParse สำหรับ parse CSV -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
 <style>
-  body { margin:0; font-family: Arial; background:#000; }
-  video { width:100vw; height:100vh; object-fit:cover; }
+  body { margin:0; font-family: Arial, system-ui, sans-serif; background:#000; color:#fff; }
+  video { width:100vw; height:100vh; object-fit:cover; display:block; }
 
   #status {
-    position:fixed;
-    top:0;
-    width:100%;
-    background:rgba(0,0,0,.7);
-    color:#fff;
-    padding:6px 10px;
-    font-size:14px;
+    position:fixed; top:0; left:0; right:0;
+    background:rgba(0,0,0,.7); color:#fff;
+    padding:8px 12px; font-size:14px; z-index:10;
   }
 
   #overlay {
-    position:fixed;
-    bottom:0;
-    width:100%;
-    background:rgba(0,0,0,.85);
-    color:#00ff88;
-    padding:10px;
-    font-size:16px;
-    max-height:45%;
-    overflow:auto;
+    position:fixed; bottom:0; left:0; right:0;
+    background:rgba(0,0,0,.85); color:#00ff88;
+    padding:10px; font-size:15px; max-height:45%;
+    overflow:auto; z-index:10;
+  }
+
+  #toolbar {
+    position:fixed; top:40px; right:10px; z-index:11;
+    display:flex; gap:8px; flex-wrap:wrap;
+  }
+  .btn {
+    background:rgba(0,0,0,.6);
+    color:#fff; border:1px solid #00ff88; border-radius:6px;
+    padding:6px 10px; font-size:14px; cursor:pointer;
+  }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+
+  /* ROI (กรอบช่วยเล็ง) */
+  .roi {
+    position:fixed; inset:0; pointer-events:none; z-index:5;
+  }
+  .roi::before {
+    content:"";
+    position:absolute; left:50%; top:50%;
+    transform:translate(-50%, -50%);
+    width:60vw; height:30vh;            /* ปรับพื้นที่สแกนหลักได้ */
+    border:2px dashed rgba(0,255,136,.9);
+    box-shadow:
+      0 0 0 9999px rgba(0,0,0,.35) inset, /* ทำให้รอบนอกมืดลง */
+      0 0 12px rgba(0,255,136,.5);
+    border-radius:8px;
+  }
+
+  .small {
+    color:#ccc; font-size:12px;
   }
 </style>
 </head>
 
 <body>
+  <div id="status">กำลังโหลดข้อมูล…</div>
+  <div id="toolbar">
+    <button id="btnToggleTorch" class="btn" disabled>🔦 เปิดไฟฉาย</button>
+    <button id="btnUnlock" class="btn" disabled>🔁 สแกนใหม่</button>
+  </div>
+  <div class="roi" aria-hidden="true"></div>
 
-<div id="status">กำลังโหลดข้อมูล…</div>
-<video id="video" autoplay playsinline></video>
-<div id="overlay">รอการสแกน…</div>
+  <video id="video" autoplay playsinline></video>
+  <div id="overlay">รอการสแกน…</div>
+
+  <!-- เสียงติ๊งเมื่อพบ -->
+  <audio id="ding" preload="auto">
+    <source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3" type="audio/mpeg">
+  </audio>
 
 <script>
 const video   = document.getElementById("video");
 const overlay = document.getElementById("overlay");
-const status  = document.getElementById("status");
+const statusEl  = document.getElementById("status");
+const btnUnlock = document.getElementById("btnUnlock");
+const btnToggleTorch = document.getElementById("btnToggleTorch");
+const ding = document.getElementById("ding");
 
 /* ==============================
    1) Google Sheet (CSV)
    ============================== */
 const SHEET_URL =
-"https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-let ASSETS = {};
+const ASSETS = new Map(); // ใช้ Map เพื่อค้นหาง่ายและชัดเจน
 
 /* ==============================
-   2) โหลดข้อมูลจาก Sheet
+   2) โหลดข้อมูลจาก Sheet (ทน CSV ที่ซับซ้อน)
    ============================== */
-fetch(SHEET_URL)
-  .then(r => r.text())
-  .then(csv => {
-    const rows = csv.split("\n").slice(1);
+async function loadSheet() {
+  try {
+    const res = await fetch(SHEET_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const text = await res.text();
 
-    rows.forEach(row => {
-      const c = row.split(",");
-
-      // คอลัมน์ B เช่น 510452225-0000
-      const rawCode = (c[1] || "").trim();
-
-      // ✅ ดึงเฉพาะเลขติดกัน 8–9 หลัก
-      const shortCode = rawCode.match(/\d{8,9}/)?.[0];
-
-      if (shortCode) {
-        ASSETS[shortCode] = `
-          <b>รหัส:</b> ${rawCode}<br>
-          <b>รายละเอียด:</b> ${c[3] || "-"}<br>
-          <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
-          <b>หมายเลขผลิต:</b> ${c[6] || "-"}<br>
-          <b>วันที่ได้มา:</b> ${c[7] || "-"}<br>
-          <b>มูลค่า:</b> ${c[8] || "-"} บาท<br>
-          <b>สถานะ:</b> ${c[11] || "-"}
-        `;
-      }
+    // PapaParse จะ handle เครื่องหมายคำพูด/คอมม่า/บรรทัดว่าง
+    const parsed = Papa.parse(text, {
+      header: false,
+      skipEmptyLines: true
     });
 
-    status.innerText = "โหลดข้อมูลเรียบร้อย";
-  })
-  .catch(() => {
-    status.innerText = "โหลด Google Sheet ไม่สำเร็จ";
-  });
+    // ข้ามแถวหัวตาราง (index 0)
+    for (let i = 1; i < parsed.data.length; i++) {
+      const c = parsed.data[i];
+
+      // ป้องกัน index ไม่มี
+      const colB = ((c[1] ?? "") + "").trim(); // คอลัมน์ B เช่น 510452225-0000
+      const short = colB.match(/\d{8,9}/)?.[0];
+      if (!short) continue;
+
+      // เตรียมคอลัมน์ที่ใช้งาน (กันไม่มีด้วย ?? "-")
+      const detail  = (c[3] ?? "-").toString().trim();
+      const brand   = (c[5] ?? "-").toString().trim();
+      const serial  = (c[6] ?? "-").toString().trim();
+      const gotDate = (c[7] ?? "-").toString().trim();
+      const price   = (c[8] ?? "-").toString().trim();
+      const status  = (c[11] ?? "-").toString().trim();
+
+      const html = `
+        <b>รหัส:</b> ${escapeHTML(colB)}<br>
+        <b>รายละเอียด:</b> ${escapeHTML(detail)}<br>
+        <b>ยี่ห้อ:</b> ${escapeHTML(brand)}<br>
+        <b>หมายเลขผลิต:</b> ${escapeHTML(serial)}<br>
+        <b>วันที่ได้มา:</b> ${escapeHTML(gotDate)}<br>
+        <b>มูลค่า:</b> ${escapeHTML(price)} บาท<br>
+        <b>สถานะ:</b> ${escapeHTML(status)}
+      `;
+
+      ASSETS.set(short, html);
+    }
+
+    statusEl.innerText = `โหลดข้อมูลเรียบร้อย • รายการ: ${ASSETS.size.toLocaleString()} ชิ้น`;
+  } catch (e) {
+    console.error(e);
+    statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ";
+  }
+}
 
 /* ==============================
-   3) เปิดกล้อง
+   3) เปิดกล้อง + (ไฟฉาย ถ้ารองรับ)
    ============================== */
-navigator.mediaDevices.getUserMedia({
-  video: { facingMode: "environment" }
-}).then(stream => {
-  video.srcObject = stream;
-  status.innerText = "กล้องพร้อมใช้งาน";
+let currentStream = null;
+let track = null;
+let imageCapture = null;
+let torchOn = false;
+
+async function initCamera() {
+  try {
+    const constraints = {
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
+      audio: false
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    currentStream = stream;
+    video.srcObject = stream;
+    statusEl.innerText = "กล้องพร้อมใช้งาน";
+
+    track = stream.getVideoTracks()[0];
+
+    // ลองสร้าง ImageCapture เพื่อตรวจ Torch
+    try {
+      const trackSettings = track.getSettings?.() || {};
+      const trackCapabilities = track.getCapabilities?.() || {};
+      if ("torch" in trackCapabilities) {
+        imageCapture = new ImageCapture(track);
+        btnToggleTorch.disabled = false;
+      }
+    } catch {
+      // ไม่รองรับไฟฉาย
+    }
+  } catch (err) {
+    console.error(err);
+    statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + (err.message || err);
+  }
+}
+
+btnToggleTorch.addEventListener("click", async () => {
+  if (!track) return;
+  try {
+    const caps = track.getCapabilities?.() || {};
+    if (!("torch" in caps)) return;
+
+    torchOn = !torchOn;
+    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+    btnToggleTorch.textContent = torchOn ? "🔦 ปิดไฟฉาย" : "🔦 เปิดไฟฉาย";
+  } catch (e) {
+    console.warn("Torch error:", e);
+  }
 });
 
 /* ==============================
-   4) OCR (จับเลข ≥ 8 หลักเท่านั้น)
+   4) เตรียม Tesseract Worker
    ============================== */
-let locked = false;
+let worker;
+let workerReady = false;
 
-setInterval(async () => {
-  if (locked || video.videoWidth === 0) return;
-
-  const canvas = document.createElement("canvas");
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0);
-
-  const ocr = await Tesseract.recognize(canvas, "eng", {
-    tessedit_char_whitelist: "0123456789",
-    classify_bln_numeric_mode: 1
+async function initOcr() {
+  worker = await Tesseract.createWorker("eng", 1, {
+    logger: m => {
+      // console.log(m);
+    }
   });
 
-  const rawText = ocr.data.text || "";
+  // จำกัดให้เน้นตัวเลข
+  await worker.setParameters({
+    tessedit_char_whitelist: "0123456789",
+    classify_bln_numeric_mode: "1"
+  });
 
-  // ดึงเลขที่ติดกันอย่างน้อย 8 หลัก
-  const found = rawText.match(/\d{8,9}/);
+  workerReady = true;
+}
 
-  overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
+/* ==============================
+   5) วนสแกนด้วย ROI + debounce
+   ============================== */
+let locked = false;
+let lastRun = 0;
+const SCAN_INTERVAL_MS = 1200;
 
-  if (found) {
-    const code = found[0];
+function getRoiCanvas() {
+  // สร้าง canvas ตัดเฉพาะโซนกลางภาพ (60% x 30%) เพื่อความเร็วและความแม่นยำ
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return null;
 
-    if (ASSETS[code]) {
-      locked = true;
-      overlay.innerHTML =
-        "✅ พบข้อมูลสินทรัพย์<br><br>" + ASSETS[code];
-    } else {
-      overlay.innerHTML =
-        "⚠️ พบเลข " + code + "<br>แต่ไม่พบในฐานข้อมูล";
-    }
+  const roiW = Math.floor(vw * 0.60);
+  const roiH = Math.floor(vh * 0.30);
+  const roiX = Math.floor((vw - roiW) / 2);
+  const roiY = Math.floor((vh - roiH) / 2);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = roiW;
+  canvas.height = roiH;
+
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  // วาดเฉพาะ ROI
+  ctx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, roiW, roiH);
+
+  // ทำ pre-process เล็กน้อย: เพิ่มคอนทราสต์/ลดนอยส์ (ง่ายๆ)
+  const imgData = ctx.getImageData(0, 0, roiW, roiH);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // แปลงเป็น grayscale
+    const gray = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114) | 0;
+    // เพิ่มคอนทราสต์แบบง่าย
+    const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.2 + 128));
+    const v = contrasted;
+    d[i] = d[i+1] = d[i+2] = v;
+    // alpha คงเดิม
   }
+  ctx.putImageData(imgData, 0, 0);
 
-}, 1500);
+  return canvas;
+}
+
+async function loopScan() {
+  const now = Date.now();
+  if (!workerReady || locked) return;
+  if (now - lastRun < SCAN_INTERVAL_MS) return;
+  if (video.readyState < 2 || video.videoWidth === 0) return;
+
+  lastRun = now;
+
+  const canvas = getRoiCanvas();
+  if (!canvas) return;
+
+  try {
+    const { data } = await worker.recognize(canvas);
+    const raw = (data.text || "").replace(/\s+/g, " ").trim();
+
+    // แสดงตัวอย่างข้อความ OCR ที่อ่านได้
+    overlay.innerHTML = `OCR อ่านได้:<br><span class="small">${escapeHTML(raw)}</span>`;
+
+    // ค้นหาเลขติดกัน 8–9 หลัก
+    const found = raw.match(/\d{8,9}/);
+    if (found) {
+      const code = found[0];
+
+      if (ASSETS.has(code)) {
+        locked = true;
+        const html = ASSETS.get(code);
+        overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${html}`;
+
+        // สั่น + เสียง
+        try { navigator.vibrate?.(120); } catch {}
+        try { ding.currentTime = 0; ding.play().catch(()=>{}); } catch {}
+
+        btnUnlock.disabled = false;
+      } else {
+        overlay.innerHTML = `⚠️ พบเลข ${escapeHTML(code)}<br>แต่ไม่พบในฐานข้อมูล`;
+      }
+    }
+  } catch (e) {
+    console.error("OCR error:", e);
+  }
+}
+
+// ปลดล็อกเพื่อสแกนใหม่
+btnUnlock.addEventListener("click", () => {
+  locked = false;
+  btnUnlock.disabled = true;
+  overlay.innerHTML = "รอการสแกน…";
+});
+
+// วนสแกนด้วย setInterval + guard time
+setInterval(loopScan, 200);
+
+/* ==============================
+   Utils
+   ============================== */
+function escapeHTML(str) {
+  return (str ?? "").toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+/* ==============================
+   เริ่มทำงาน
+   ============================== */
+(async function main() {
+  await loadSheet();
+  await initCamera();
+  await initOcr();
+  statusEl.innerText += " • OCR พร้อมใช้งาน";
+})();
 </script>
 
 </body>
