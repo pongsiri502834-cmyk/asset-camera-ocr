@@ -9,37 +9,38 @@
 
 <style>
   body {
-    margin:0;
-    background:#000;
+    margin: 0;
     font-family: Arial, sans-serif;
+    background: #000;
+    overflow: hidden;
   }
   video {
-    width:100vw;
-    height:100vh;
-    object-fit:cover;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
   }
   #status {
-    position:fixed;
-    top:0;
-    width:100%;
-    background:rgba(0,0,0,0.6);
-    color:#fff;
-    padding:6px 10px;
-    font-size:14px;
-    z-index:10;
+    position: fixed;
+    top: 0;
+    width: 100%;
+    padding: 6px 10px;
+    background: rgba(0,0,0,0.65);
+    color: #fff;
+    font-size: 14px;
+    z-index: 10;
   }
   #overlay {
-    position:fixed;
-    bottom:0;
-    width:100%;
-    background:rgba(0,0,0,0.78);
-    color:#00ff88;
-    padding:12px;
-    font-size:16px;
-    max-height:45%;
-    overflow:auto;
-    box-sizing:border-box;
-    z-index:10;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    max-height: 45%;
+    overflow: auto;
+    padding: 12px;
+    background: rgba(0,0,0,0.8);
+    color: #00ff88;
+    font-size: 16px;
+    box-sizing: border-box;
+    z-index: 10;
   }
 </style>
 </head>
@@ -48,7 +49,7 @@
 
 <div id="status">กำลังเริ่มต้น…</div>
 <video id="video" autoplay playsinline></video>
-<div id="overlay">รอการอ่านจากกล้อง…</div>
+<div id="overlay">รอ OCR…</div>
 
 <script>
 const video   = document.getElementById("video");
@@ -56,35 +57,36 @@ const overlay = document.getElementById("overlay");
 const status  = document.getElementById("status");
 
 /* =========================
-   1) ตั้งค่า Google Sheet
+   1) Google Sheet (CSV)
    ========================= */
+// ❗ ต้องเป็น publish to web และลงท้าย output=csv
 const SHEET_URL =
 "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
+// key = คอลัมน์ B (รหัสสินทรัพย์)
 let ASSETS = {};
 
 /* =========================
    2) โหลดข้อมูลจาก Sheet
    ========================= */
 fetch(SHEET_URL)
-  .then(res => res.text())
+  .then(r => r.text())
   .then(csv => {
     const rows = csv.split("\n").slice(1);
-    rows.forEach(r => {
-      const c = r.split(",");
-      const code = (c[1] || "").trim(); // คอลัมน์ B
+    rows.forEach(row => {
+      const c = row.split(",");
+      const code = (c[1] || "").trim(); // 🔑 คอลัมน์ B
+      if (!code) return;
 
-      if (code) {
-        ASSETS[code] = `
-          <b>รหัส:</b> ${code}<br>
-          <b>รายละเอียด:</b> ${c[3] || "-"}<br>
-          <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
-          <b>หมายเลขผลิต:</b> ${c[6] || "-"}<br>
-          <b>วันที่ได้มา:</b> ${c[7] || "-"}<br>
-          <b>มูลค่า:</b> ${c[8] || "-"} บาท<br>
-          <b>สถานะ:</b> ${c[11] || "-"}
-        `;
-      }
+      ASSETS[code] = `
+        <b>รหัส:</b> ${code}<br>
+        <b>รายละเอียด:</b> ${c[3] || "-"}<br>
+        <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
+        <b>หมายเลขผลิต:</b> ${c[6] || "-"}<br>
+        <b>วันที่ได้มา:</b> ${c[7] || "-"}<br>
+        <b>มูลค่า:</b> ${c[8] || "-"} บาท<br>
+        <b>สถานะ:</b> ${c[11] || "-"}
+      `;
     });
     status.innerText = "โหลดข้อมูลจาก Google Sheet เรียบร้อย";
   })
@@ -100,28 +102,11 @@ navigator.mediaDevices.getUserMedia({
   video: { facingMode: "environment" }
 }).then(stream => {
   video.srcObject = stream;
-  status.innerText = "กล้องพร้อมใช้งาน";
+  status.innerText += " | กล้องพร้อมใช้งาน";
 }).catch(err => {
   status.innerText = "ไม่สามารถเปิดกล้องได้";
   console.error(err);
 });
-
-/* =========================
-   ฟังก์ชัน match แบบยืดหยุ่น
-   ========================= */
-function findAsset(cleanText) {
-  for (const key in ASSETS) {
-    const cleanKey = key.replace(/[^0-9]/g, "");
-    if (
-      cleanText.includes(cleanKey) ||
-      cleanText.includes(cleanKey.slice(-6)) ||
-      cleanKey.includes(cleanText)
-    ) {
-      return ASSETS[key];
-    }
-  }
-  return null;
-}
 
 /* =========================
    4) OCR ทุก 2 วินาที
@@ -129,41 +114,59 @@ function findAsset(cleanText) {
 setInterval(async () => {
   if (video.videoWidth === 0) return;
 
+  // === crop กลางจอ ===
+  const cropW = video.videoWidth * 0.6;
+  const cropH = video.videoHeight * 0.25;
+  const sx = (video.videoWidth - cropW) / 2;
+  const sy = (video.videoHeight - cropH) / 2;
+
   const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  const w = video.videoWidth;
-  const h = video.videoHeight;
-
-  // crop เฉพาะกลางภาพ (ป้าย)
-  const cropW = w * 0.6;
-  const cropH = h * 0.3;
-  const sx = (w - cropW) / 2;
-  const sy = (h - cropH) / 2;
-
   canvas.width = cropW;
   canvas.height = cropH;
-  ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, cropW, cropH);
+  const ctx = canvas.getContext("2d");
+
+  // 🔁 หมุน 180° (แก้ป้ายกลับหัว)
+  ctx.save();
+  ctx.translate(cropW / 2, cropH / 2);
+  ctx.rotate(Math.PI);
+  ctx.drawImage(
+    video,
+    sx, sy, cropW, cropH,
+    -cropW / 2, -cropH / 2,
+    cropW, cropH
+  );
+  ctx.restore();
 
   try {
-    const ocr = await Tesseract.recognize(canvas, "eng", {
-      tessedit_char_whitelist: "0123456789-",
-      classify_bln_numeric_mode: 1
-    });
+    const ocr = await Tesseract.recognize(
+      canvas,
+      "eng+tha",
+      {
+        tessedit_char_whitelist: "0123456789",
+        preserve_interword_spaces: 1
+      }
+    );
 
     const rawText = ocr.data.text || "";
-    overlay.innerHTML = "OCR อ่านได้:<br>" + rawText;
-
     const cleanText = rawText.replace(/[^0-9]/g, "");
 
-    const found = findAsset(cleanText);
-    if (found) {
-      overlay.innerHTML = "✅ พบข้อมูล<br>" + found;
-    }
+    // debug
+    overlay.innerHTML =
+      "OCR อ่านได้:<br>" + rawText +
+      "<br><br>Clean:<br>" + cleanText;
+
+    // match กับคอลัมน์ B
+    Object.keys(ASSETS).forEach(code => {
+      const cleanCode = code.replace(/[^0-9]/g, "");
+      if (cleanCode && cleanText.includes(cleanCode)) {
+        overlay.innerHTML = "✅ พบข้อมูล<br>" + ASSETS[code];
+      }
+    });
 
   } catch (e) {
     console.error(e);
   }
+
 }, 2000);
 </script>
 
