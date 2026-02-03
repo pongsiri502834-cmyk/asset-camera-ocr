@@ -11,6 +11,16 @@
 body { margin:0; background:#000; font-family:Arial; }
 video { width:100vw; height:100vh; object-fit:cover; }
 
+#scanBox {
+  position:fixed;
+  top:30%;
+  left:10%;
+  width:80%;
+  height:20%;
+  border:3px solid #00ff88;
+  box-sizing:border-box;
+}
+
 #status {
   position:fixed; top:0; width:100%;
   background:rgba(0,0,0,.7);
@@ -30,86 +40,47 @@ video { width:100vw; height:100vh; object-fit:cover; }
 
 <body>
 
-<div id="status">กำลังโหลดข้อมูล…</div>
+<div id="status">โหลดข้อมูล…</div>
 <video id="video" autoplay playsinline></video>
-<div id="overlay">รอการอ่าน OCR</div>
+<div id="scanBox"></div>
+<div id="overlay">วางป้ายให้อยู่ในกรอบ</div>
 
 <script>
-const video   = document.getElementById("video");
+const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
-const status  = document.getElementById("status");
+const status = document.getElementById("status");
 
-/* ================= Google Sheet ================= */
-const SHEET_URL =
-"https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
-
-let ASSETS = {};
 let locked = false;
 
-/* ================= โหลด Sheet ================= */
-fetch(SHEET_URL)
-.then(r => r.text())
-.then(csv => {
-  csv.split("\n").slice(1).forEach(r => {
-    const c = r.split(",");
-    const code = (c[1] || "").replace(/\D/g,""); // คอลัมน์ B
-    if (code.length >= 8) {
-      ASSETS[code] = `
-        <b>รหัสสินทรัพย์:</b> ${c[1]}<br>
-        <b>รายละเอียด:</b> ${c[3] || "-"}<br>
-        <b>ยี่ห้อ:</b> ${c[5] || "-"}<br>
-        <b>หมายเลข:</b> ${c[6] || "-"}<br>
-        <b>วันที่ได้มา:</b> ${c[7] || "-"}<br>
-        <b>มูลค่า:</b> ${c[8] || "-"} บาท<br>
-        <b>สถานะ:</b> ${c[11] || "-"}
-      `;
-    }
-  });
-  status.innerText = "โหลดข้อมูลแล้ว – เปิดกล้อง";
-});
-
-/* ================= เปิดกล้อง ================= */
+/* ===== เปิดกล้อง ===== */
 navigator.mediaDevices.getUserMedia({
   video:{ facingMode:"environment" }
 }).then(s=>{
   video.srcObject = s;
+  status.innerText = "กล้องพร้อมใช้งาน";
 });
 
-/* ================= OCR Loop ================= */
+/* ===== OCR Loop ===== */
 setInterval(async () => {
   if (locked || video.videoWidth === 0) return;
 
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+
+  // 🔥 crop เฉพาะกรอบกลาง
+  const sx = vw * 0.10;
+  const sy = vh * 0.30;
+  const sw = vw * 0.80;
+  const sh = vh * 0.20;
+
   const canvas = document.createElement("canvas");
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0);
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
-  const ocr = await Tesseract.recognize(canvas, "eng", {
-    tessedit_char_whitelist: "0123456789",
-    classify_bln_numeric_mode: 1
-  });
-
-  const rawText = ocr.data.text || "";
-
-  // 🔥 ดึงเฉพาะเลขที่เรียงกันตั้งแต่ 8 ตัวขึ้นไป
-  const matches = rawText.match(/\d{8,}/g) || [];
-
-  overlay.innerHTML =
-    "<b>OCR อ่านได้:</b><br>" + rawText +
-    "<br><br><b>เลขที่เข้าเงื่อนไข (≥8):</b><br>" +
-    (matches.join("<br>") || "-");
-
-  for (const num of matches) {
-    if (ASSETS[num]) {
-      locked = true;
-      overlay.innerHTML = "✅ พบข้อมูลแล้ว<br><br>" + ASSETS[num];
-      status.innerText = "ล็อกผลแล้ว";
-      break;
-    }
-  }
-
-}, 1500);
-</script>
-
-</body>
-</html>
+  // 🔥 แปลงเป็นขาวดำ + เพิ่ม contrast
+  const img = ctx.getImageData(0,0,sw,sh);
+  for(let i=0;i<img.data.length;i+=4){
+    const avg = (img.data[i]+img.data[i+1]+img.data[i+2])/3;
+    const v = avg > 1
