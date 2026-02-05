@@ -7,7 +7,7 @@
 
 <!-- Tesseract.js v5 -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<!-- PapaParse สำหรับ parse CSV -->
+<!-- PapaParse -->
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
 <style>
@@ -27,7 +27,6 @@
     border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
 
-  /* ROI (กรอบช่วยเล็ง) */
   .roi { position:fixed; inset:0; pointer-events:none; z-index:5; }
   .roi::before{
     content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -60,89 +59,184 @@
   </audio>
 
 <script>
-/* ============== DOM ============== */
+/* ==============================
+   CONFIG — ปรับค่านี้ให้ตรงชีตพี่
+   ============================== */
+const SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
+
+/** กำหนด "ตัวอักษรคอลัมน์" ตามที่ต้องการแสดง (ไม่พึ่ง index) */
+const COLS = {
+  CODE: 'B',          // รหัส
+  DETAIL: 'D',        // รายละเอียด
+  PRICE: 'I',         // มูลค่า
+  BOOK: 'N',          // มูลค่าตามบัญชี
+  KEEPER: 'K',        // ชื่อผู้ครอบครอง
+  STATUS: 'L'         // สถานะ
+};
+
+/** (ทางเลือก) กรอก "ชื่อหัวตาราง" จริง ๆ ที่อยู่ในแถวหัว (row 1) 
+ *  ถ้ากรอกไว้ ระบบจะจับตามชื่อก่อน → หากหาไม่เจอจึง fallback ไปใช้ COLS (ตัวอักษรคอลัมน์)
+ *  ปล่อยว่างไว้ได้
+ */
+const HEADERS = {
+  CODE:   "",   // เช่น "รหัส" หรือ "เลขครุภัณฑ์"
+  DETAIL: "",   // เช่น "รายละเอียด"
+  PRICE:  "",   // เช่น "มูลค่า"
+  BOOK:   "",   // เช่น "มูลค่าตามบัญชี"
+  KEEPER: "",   // เช่น "ชื่อผู้ครอบครอง"
+  STATUS: ""    // เช่น "สถานะ"
+};
+
+/* ==============================
+   DOM refs
+   ============================== */
 const video   = document.getElementById("video");
 const overlay = document.getElementById("overlay");
-const statusEl= document.getElementById("status");
+const statusEl  = document.getElementById("status");
 const btnUnlock = document.getElementById("btnUnlock");
 const btnToggleTorch = document.getElementById("btnToggleTorch");
 const ding = document.getElementById("ding");
 
-/* ============== 1) Google Sheet URL ============== */
-const SHEET_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
-
-/* ============== ดัชนีตามเลขฐาน ============== */
-const ASSETS_BASE = new Map(); // key: baseNumber, value: Array<Asset>
-
-/* ============== Utils ============== */
+/* ==============================
+   Helpers
+   ============================== */
 function escapeHTML(str){
   return (str??"").toString()
    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 }
-/** ดึงเลขฐาน 8–9 หลักจากสตริง */
 function normalizeBase(str){
   const m = ((str??"")+"").match(/\d{8,9}/);
   return m ? m[0] : "";
 }
-
-/* โครงข้อมูลที่จะแสดงตามคำสั่งของพี่ (B,D,I,K,N,L) */
-function makeAssetFromRow(c){
-  // mapping: B(1), D(3), I(8), K(10), N(13), L(11)
-  const codeB = ((c[1]  ?? "")+"").trim();   // B → รหัส
-  const base  = normalizeBase(codeB);
-  if(!base) return null;
-
-  const detailD = ((c[3]  ?? "")+"").trim(); // D → รายละเอียด
-  const priceI  = ((c[8]  ?? "")+"").trim(); // I → มูลค่า
-  const keeperK = ((c[10] ?? "")+"").trim(); // K → ชื่อผู้ครอบครอง
-  const bookN   = ((c[13] ?? "")+"").trim(); // N → มูลค่าตามบัญชี
-  const statusL = ((c[11] ?? "")+"").trim(); // L → สถานะ
-
-  return {
-    base,       // เลขฐาน
-    codeB,      // รหัส
-    detailD,    // รายละเอียด
-    priceI,     // มูลค่า
-    keeperK,    // ชื่อผู้ครอบครอง
-    bookN,      // มูลค่าตามบัญชี
-    statusL     // สถานะ
-  };
+/** แปลงตัวอักษรคอลัมน์ -> index (A=0, B=1, …) */
+function colLetterToIndex(letter){
+  const s = (letter||"").toUpperCase().trim();
+  let n = 0;
+  for (let i=0; i<s.length; i++){
+    n = n*26 + (s.charCodeAt(i)-64);
+  }
+  return n-1;
 }
 
-/* แปลงเป็น HTML ตามลำดับและชื่อหัวข้อที่กำหนด */
-function assetToHTML(a){
-  return `
-    <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
-    <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
-    <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
-    <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
-    <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
-    <b>สถานะ:</b> ${escapeHTML(a.statusL)}
-  `;
+/** คืนค่าจาก row ตาม "ชื่อหัวคอลัมน์" (แบบยืดหยุ่น) */
+function getByHeader(rowObj, headerName){
+  if(!headerName) return undefined;
+  const keys = Object.keys(rowObj);
+  // แมทช์แบบไม่สนเว้นวรรค/เคส
+  const target = headerName.replace(/\s+/g,'').toLowerCase();
+  for (const k of keys){
+    const norm = k.replace(/\s+/g,'').toLowerCase();
+    if (norm === target) return rowObj[k];
+  }
+  return undefined;
 }
 
-/* ============== 2) โหลดชีต ============== */
+/** เลือกค่าจาก row (รองรับทั้งแบบ header object และ index ตามตัวอักษรคอลัมน์) */
+function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
+  // 1) ถ้าเป็น object (Papa header:true) → ลองตาม headerName
+  if (!Array.isArray(rowObjOrArr)) {
+    const v = getByHeader(rowObjOrArr, headerName);
+    if (v !== undefined && v !== null && v !== "") return v;
+    // ไม่เจอ → ลองด้วย headerMap (map ที่จับชื่อหัวจริง → letter)
+    if (headerMap && fallbackColLetter) {
+      const letter = headerMap[fallbackColLetter]; // headerMap['B'] = actual header key
+      if (letter && rowObjOrArr[letter] !== undefined) return rowObjOrArr[letter];
+    }
+    // สุดท้าย → ลองใช้ชื่อคีย์ตามตัวอักษร (หากหัวคอลัมน์จริงถูก export มาเป็น 'B', 'D' ฯลฯ ซึ่งไม่ค่อยเกิด)
+    if (rowObjOrArr[fallbackColLetter] !== undefined) return rowObjOrArr[fallbackColLetter];
+    return "";
+  }
+
+  // 2) ถ้าเป็น array (header:false) → ใช้ตัวอักษรคอลัมน์เป็นหลัก
+  const idx = colLetterToIndex(fallbackColLetter);
+  return (rowObjOrArr[idx] ?? "");
+}
+
+/* ==============================
+   1) โหลดข้อมูลจาก Sheet
+   ============================== */
+const ASSETS_BASE = new Map(); // key: เลขฐาน, value: Array<asset>
+let HEADER_ROW_KEYS = [];      // เก็บชื่อ header จริงในชีต (เมื่อใช้ header:true)
+
 async function loadSheet(){
   try{
     const res = await fetch(SHEET_URL,{cache:"no-store"});
     if(!res.ok) throw new Error("HTTP "+res.status);
     const text = await res.text();
 
-    const parsed = Papa.parse(text,{header:false, skipEmptyLines:true});
+    // ลอง parse แบบมี header ก่อน (แม่นกว่า)
+    let parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+    let useHeader = true;
 
-    // ข้ามหัวตาราง (index 0)
+    if (!parsed.data || !parsed.data.length || Object.keys(parsed.data[0]).length <= 1) {
+      // ถ้า parse แบบ header ไม่สวย → fallback เป็นไม่มี header
+      parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
+      useHeader = false;
+    }
+
+    // ทำ map: letter -> headerKey (เฉพาะตอน header:true)
+    const headerMap = {};
+    if (useHeader) {
+      HEADER_ROW_KEYS = parsed.meta.fields || [];
+      // สร้าง mapping แบบง่ายโดยการอ้างลำดับคอลัมน์ตาม fields
+      HEADER_ROW_KEYS.forEach((k, i) => {
+        const letter = String.fromCharCode(65 + i); // 65='A'
+        headerMap[letter] = k;
+      });
+    }
+
+    // เดินทุกแถว
+    const rows = parsed.data;
     let count = 0;
-    for(let i=1;i<parsed.data.length;i++){
-      const row = parsed.data[i];
-      const a = makeAssetFromRow(row);
-      if(!a) continue;
 
-      if(!ASSETS_BASE.has(a.base)) ASSETS_BASE.set(a.base, []);
-      ASSETS_BASE.get(a.base).push(a);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+
+      // ดึง "รหัส (B)" เพื่อหาเลขฐาน
+      const codeB = useHeader
+        ? pickValue(row, HEADERS.CODE, COLS.CODE, headerMap)
+        : pickValue(row, "", COLS.CODE);
+
+      const base = normalizeBase(codeB);
+      if (!base) continue;
+
+      const detailD = useHeader
+        ? pickValue(row, HEADERS.DETAIL, COLS.DETAIL, headerMap)
+        : pickValue(row, "", COLS.DETAIL);
+
+      const priceI = useHeader
+        ? pickValue(row, HEADERS.PRICE, COLS.PRICE, headerMap)
+        : pickValue(row, "", COLS.PRICE);
+
+      const bookN = useHeader
+        ? pickValue(row, HEADERS.BOOK, COLS.BOOK, headerMap)
+        : pickValue(row, "", COLS.BOOK);
+
+      const keeperK = useHeader
+        ? pickValue(row, HEADERS.KEEPER, COLS.KEEPER, headerMap)
+        : pickValue(row, "", COLS.KEEPER);
+
+      const statusL = useHeader
+        ? pickValue(row, HEADERS.STATUS, COLS.STATUS, headerMap)
+        : pickValue(row, "", COLS.STATUS);
+
+      const asset = {
+        base,
+        codeB: (codeB ?? "").toString().trim(),
+        detailD: (detailD ?? "").toString().trim(),
+        priceI: (priceI ?? "").toString().trim(),
+        bookN: (bookN ?? "").toString().trim(),
+        keeperK: (keeperK ?? "").toString().trim(),
+        statusL: (statusL ?? "").toString().trim()
+      };
+
+      if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
+      ASSETS_BASE.get(base).push(asset);
       count++;
     }
+
     statusEl.innerText = `โหลดข้อมูลเรียบร้อย • แถว: ${count.toLocaleString()} • เลขฐาน: ${ASSETS_BASE.size.toLocaleString()}`;
   }catch(e){
     console.error(e);
@@ -150,7 +244,9 @@ async function loadSheet(){
   }
 }
 
-/* ============== 3) กล้อง & ไฟฉาย ============== */
+/* ==============================
+   2) กล้อง & ไฟฉาย
+   ============================== */
 let track=null, torchOn=false;
 async function initCamera(){
   try{
@@ -182,7 +278,9 @@ btnToggleTorch.addEventListener("click", async ()=>{
   }catch(e){ console.warn("Torch error:", e); }
 });
 
-/* ============== 4) Tesseract Worker ============== */
+/* ==============================
+   3) Tesseract Worker
+   ============================== */
 let worker, workerReady=false;
 async function initOcr(){
   worker = await Tesseract.createWorker("eng",1,{logger:()=>{}});
@@ -193,7 +291,9 @@ async function initOcr(){
   workerReady = true;
 }
 
-/* ============== 5) วนสแกนด้วย ROI + debounce ============== */
+/* ==============================
+   4) Scan loop (ROI + debounce)
+   ============================== */
 let locked=false, lastRun=0;
 const SCAN_INTERVAL_MS = 1200;
 
@@ -211,7 +311,7 @@ function getRoiCanvas(){
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(video, roiX,roiY,roiW,roiH, 0,0,roiW,roiH);
 
-  // preprocess: grayscale + contrast เล็กน้อย
+  // grayscale + contrast
   const img=ctx.getImageData(0,0,roiW,roiH); const d=img.data;
   for(let i=0;i<d.length;i+=4){
     const gray=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
@@ -220,6 +320,18 @@ function getRoiCanvas(){
   }
   ctx.putImageData(img,0,0);
   return canvas;
+}
+
+function assetToHTML(a){
+  // แสดงตามลำดับที่พี่กำหนด + ป้ายชื่อหัวเรื่องไทย
+  return `
+    <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
+    <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
+    <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
+    <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
+    <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
+    <b>สถานะ:</b> ${escapeHTML(a.statusL)}
+  `;
 }
 
 async function loopScan(){
@@ -273,7 +385,9 @@ btnUnlock.addEventListener("click", ()=>{
 });
 setInterval(loopScan,200);
 
-/* ============== Start ============== */
+/* ==============================
+   Bootstrap
+   ============================== */
 (async function main(){
   await loadSheet();
   await initCamera();
