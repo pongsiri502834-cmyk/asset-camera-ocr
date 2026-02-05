@@ -65,25 +65,31 @@
 const SHEET_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-/** อ้างอิงด้วย “ตัวอักษรคอลัมน์” */
-const COLS = {
-  CODE:   'B',   // รหัส
-  DETAIL: 'D',   // รายละเอียด
-  PRICE:  'I',   // มูลค่า
-  BOOK:   'N',   // มูลค่าตามบัญชี
-  KEEPER: 'K',   // ชื่อผู้ครอบครอง
-  STATUS: 'L'    // สถานะ
+/** ใช้ชื่อหัวคอลัมน์ “หลายรูปแบบ” ให้ตรงของจริงมากที่สุด */
+const HEADERS_SYNONYMS = {
+  CODE:   ["รหัส", "เลขครุภัณฑ์", "รหัสครุภัณฑ์", "เลขสินทรัพย์"],
+  DETAIL: ["รายละเอียด", "รายการ", "คำอธิบาย"],
+  PRICE:  ["มูลค่า", "ราคาทุน", "ราคา", "มูลค่าเดิม"],
+  BOOK:   ["มูลค่าตามบัญชี", "มูลค่าสุทธิ", "มูลค่าคงเหลือ", "มูลค่า(ตามบัญชี)"],
+  KEEPER: ["ชื่อผู้ครอบครอง", "ผู้ดูแลครอบครอง", "ผู้ถือครอง", "ผู้ครอบครอง", "ผู้รับผิดชอบ"],
+  STATUS: ["สถานะ", "สถานะการใช้งาน", "การใช้งาน"]
 };
 
-/** (ถ้ามี) ใส่ชื่อหัวคอลัมน์จริง เพื่อความชัวร์ยิ่งขึ้น */
-const HEADERS = {
-  CODE:   "", // เช่น "รหัส"
-  DETAIL: "", // เช่น "รายละเอียด"
-  PRICE:  "", // เช่น "มูลค่า"
-  BOOK:   "", // เช่น "มูลค่าตามบัญชี"
-  KEEPER: "", // เช่น "ชื่อผู้ครอบครอง"
-  STATUS: ""  // เช่น "สถานะ"
+/** ถ้าต้อง “บังคับ” ใช้ตัวอักษรคอลัมน์ (เมื่อหัวตารางอ่านไม่ตรง) ให้ใส่ตามนี้
+ *   หมายเหตุ: จะใช้เป็น Fallback เมื่อหา header จากชื่อไม่เจอ
+ *   ต้องการ B,D,I,K,N,L ตามที่พี่กำหนด
+ */
+const FALLBACK_COL_LETTER = {
+  CODE: 'B',
+  DETAIL: 'D',
+  PRICE: 'I',
+  BOOK: 'N',
+  KEEPER: 'K',
+  STATUS: 'L'
 };
+
+/** Debug: เปิด true จะ log ชื่อหัวคอลัมน์ที่แม็ปได้ */
+const DEBUG_LOG = true;
 
 /* ==============================
    DOM
@@ -115,44 +121,50 @@ function colLetterToIndex(letter){
   }
   return n-1;
 }
-/** header helper */
-function getByHeader(rowObj, headerName){
-  if(!headerName) return undefined;
-  const keys = Object.keys(rowObj);
-  const target = headerName.replace(/\s+/g,'').toLowerCase();
-  for (const k of keys){
-    const norm = k.replace(/\s+/g,'').toLowerCase();
-    if (norm === target) return rowObj[k];
-  }
-  return undefined;
+function normalizeHeaderKey(k){
+  return k.toString().replace(/\s+/g,'').replace(/[()]/g,'').toLowerCase();
 }
-/** pick value (object with header OR array with index) */
-function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
+
+/** หา header จริงจาก fields โดยเทียบกับชุดคำพ้อง */
+function resolveHeaderKey(fields, synonyms){
+  const normalizedMap = {};
+  fields.forEach((k)=> normalizedMap[ normalizeHeaderKey(k) ] = k);
+
+  for(const name of synonyms){
+    const want = normalizeHeaderKey(name);
+    if (normalizedMap[want]) return normalizedMap[want];
+  }
+  return null;
+}
+
+/** ดึงค่าจาก row ตาม “ชื่อหัวจริง” หรือ fallback “ตัวอักษรคอลัมน์” */
+function getValue(rowObjOrArr, fields, synonyms, fallbackLetter){
+  // 1) ถ้าเป็น object (header:true)
   if (!Array.isArray(rowObjOrArr)) {
-    const v = getByHeader(rowObjOrArr, headerName);
-    if (v !== undefined && v !== null && v !== "") return v;
-    if (headerMap && fallbackColLetter) {
-      const headerKey = headerMap[fallbackColLetter];
-      if (headerKey && rowObjOrArr[headerKey] !== undefined) return rowObjOrArr[headerKey];
+    const headerKey = resolveHeaderKey(fields, synonyms);
+    if (headerKey && rowObjOrArr[headerKey] !== undefined) {
+      return rowObjOrArr[headerKey];
+    }
+    // fallback: ใช้ลำดับ fields ตรงกับตัวอักษรคอลัมน์
+    if (fallbackLetter) {
+      const idx = colLetterToIndex(fallbackLetter);
+      const fbKey = fields[idx];
+      if (fbKey && rowObjOrArr[fbKey] !== undefined) return rowObjOrArr[fbKey];
     }
     return "";
   }
-  const idx = colLetterToIndex(fallbackColLetter);
+
+  // 2) ถ้าเป็น array (header:false)
+  const idx = colLetterToIndex(fallbackLetter || 'A');
   return (rowObjOrArr[idx] ?? "");
 }
-/** เช็คว่าเป็น “ตัวเลขเงิน” ไหม */
+
+/** true ถ้าดูเหมือน “ตัวเลขเงิน” */
 function looksLikeNumber(x){
-  return typeof x === "string"
-    ? !!x.trim() && /^[\d.,]+$/.test(x.trim())
-    : typeof x === "number";
-}
-/** ปรับรูปแบบเลข: ตัดคอมมา, เว้นจุดทศนิยม */
-function normalizeNumberStr(x){
-  const s = (x ?? "").toString().trim();
-  if (!s) return s;
-  // แปลง 7,943.93 -> 7943.93 (เก็บแสดงพร้อมคอมมาอีกที หรือแสดงดิบก็ได้)
-  const cleaned = s.replace(/,/g,'');
-  return cleaned;
+  const s = (x??"").toString().trim();
+  if (!s) return false;
+  // อนุญาต 0-9 . , และช่องว่างน้อยๆ
+  return /^[\d.,\s]+$/.test(s);
 }
 
 /* ==============================
@@ -169,81 +181,81 @@ async function loadSheet(){
     if(!res.ok) throw new Error("HTTP "+res.status);
     const text = await res.text();
 
-    // พยายามใช้ header ก่อน
+    // ใช้ header:true เพื่ออ่านชื่อหัวตาราง
     let parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
     let useHeader = true;
 
-    if (!parsed.data || !parsed.data.length || Object.keys(parsed.data[0]).length <= 1) {
+    // ถ้าอ่าน header ไม่ได้จริงๆ ค่อย fallback header:false
+    if (!parsed.data || !parsed.data.length || (parsed.meta.fields||[]).length <= 1) {
       parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
       useHeader = false;
     }
 
-    // map letter -> headerKey (เมื่อ header:true)
-    const headerMap = {};
-    if (useHeader) {
-      const fields = parsed.meta.fields || [];
-      fields.forEach((k, i) => {
-        const letter = String.fromCharCode(65 + i); // 65='A'
-        headerMap[letter] = k;
-      });
+    const rows = parsed.data;
+    const fields = useHeader ? (parsed.meta.fields || []) : []; // ชื่อหัวจริง (ถ้ามี)
+    if (DEBUG_LOG && useHeader) {
+      console.log("✅ Header fields:", fields);
+      console.log("🔎 Matched headers:",
+        {
+          CODE:   resolveHeaderKey(fields, HEADERS_SYNONYMS.CODE),
+          DETAIL: resolveHeaderKey(fields, HEADERS_SYNONYMS.DETAIL),
+          PRICE:  resolveHeaderKey(fields, HEADERS_SYNONYMS.PRICE),
+          BOOK:   resolveHeaderKey(fields, HEADERS_SYNONYMS.BOOK),
+          KEEPER: resolveHeaderKey(fields, HEADERS_SYNONYMS.KEEPER),
+          STATUS: resolveHeaderKey(fields, HEADERS_SYNONYMS.STATUS)
+        }
+      );
     }
 
-    const rows = parsed.data;
     let count = 0;
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
 
-      const codeB = useHeader
-        ? pickValue(row, HEADERS.CODE,   COLS.CODE,   headerMap)
-        : pickValue(row, "",            COLS.CODE);
+      const codeB  = useHeader
+        ? getValue(row, fields, HEADERS_SYNONYMS.CODE,   FALLBACK_COL_LETTER.CODE)
+        : getValue(row, [],     [],                      FALLBACK_COL_LETTER.CODE);
+
       const base = normalizeBase(codeB);
       if (!base) continue;
 
       const detailD = useHeader
-        ? pickValue(row, HEADERS.DETAIL, COLS.DETAIL, headerMap)
-        : pickValue(row, "",            COLS.DETAIL);
+        ? getValue(row, fields, HEADERS_SYNONYMS.DETAIL, FALLBACK_COL_LETTER.DETAIL)
+        : getValue(row, [],     [],                      FALLBACK_COL_LETTER.DETAIL);
 
-      const priceI = useHeader
-        ? pickValue(row, HEADERS.PRICE,  COLS.PRICE,  headerMap)
-        : pickValue(row, "",            COLS.PRICE);
+      const priceI  = useHeader
+        ? getValue(row, fields, HEADERS_SYNONYMS.PRICE,  FALLBACK_COL_LETTER.PRICE)
+        : getValue(row, [],     [],                      FALLBACK_COL_LETTER.PRICE);
 
-      let bookN = useHeader
-        ? pickValue(row, HEADERS.BOOK,   COLS.BOOK,   headerMap)
-        : pickValue(row, "",            COLS.BOOK);
+      let bookN     = useHeader
+        ? getValue(row, fields, HEADERS_SYNONYMS.BOOK,   FALLBACK_COL_LETTER.BOOK)
+        : getValue(row, [],     [],                      FALLBACK_COL_LETTER.BOOK);
 
-      let keeperK = useHeader
-        ? pickValue(row, HEADERS.KEEPER, COLS.KEEPER, headerMap)
-        : pickValue(row, "",            COLS.KEEPER);
+      let keeperK   = useHeader
+        ? getValue(row, fields, HEADERS_SYNONYMS.KEEPER, FALLBACK_COL_LETTER.KEEPER)
+        : getValue(row, [],     [],                      FALLBACK_COL_LETTER.KEEPER);
 
       const statusL = useHeader
-        ? pickValue(row, HEADERS.STATUS, COLS.STATUS, headerMap)
-        : pickValue(row, "",            COLS.STATUS);
+        ? getValue(row, fields, HEADERS_SYNONYMS.STATUS, FALLBACK_COL_LETTER.STATUS)
+        : getValue(row, [],     [],                      FALLBACK_COL_LETTER.STATUS);
 
-      // ---------- Heuristic กันคอลัมน์สลับ ----------
-      // ถ้า bookN เป็น "ชื่อคน" (มีตัวอักษร) และ keeperK เป็น "ตัวเลข" ให้สลับกัน
-      const bookLooksNumeric   = looksLikeNumber(bookN);
-      const keeperLooksNumeric = looksLikeNumber(keeperK);
-      const bookLooksText      = /[^\d.,]/.test((bookN ?? "").toString());
-      const keeperLooksText    = /[^\d.,]/.test((keeperK ?? "").toString());
-
-      if (!bookLooksNumeric && keeperLooksNumeric && bookLooksText) {
-        // สลับ
+      // ---- Heuristic กันสลับ (สำคัญ) ----
+      const bookIsNumber   = looksLikeNumber(bookN);
+      const keeperIsNumber = looksLikeNumber(keeperK);
+      const bookIsText     = !bookIsNumber && /\D/.test((bookN??"").toString());
+      // ถ้า book เป็นข้อความ แต่ keeper เป็น “ตัวเลข” → สลับ
+      if (bookIsText && keeperIsNumber) {
         const tmp = bookN; bookN = keeperK; keeperK = tmp;
       }
 
-      // ฟอร์แมตตัวเลขให้ดูสะอาด (เก็บโชว์มีคอมม่าเดิมหรือไม่ก็ได้)
-      const priceShow = (priceI ?? "").toString().trim();
-      const bookShow  = (bookN ?? "").toString().trim();
-
       const asset = {
         base,
-        codeB:    (codeB ?? "").toString().trim(),
-        detailD:  (detailD ?? "").toString().trim(),
-        priceI:   priceShow,
-        bookN:    bookShow,
-        keeperK:  (keeperK ?? "").toString().trim(),
-        statusL:  (statusL ?? "").toString().trim()
+        codeB:   (codeB   ?? "").toString().trim(),
+        detailD: (detailD ?? "").toString().trim(),
+        priceI:  (priceI  ?? "").toString().trim(),
+        bookN:   (bookN   ?? "").toString().trim(),
+        keeperK: (keeperK ?? "").toString().trim(),
+        statusL: (statusL ?? "").toString().trim()
       };
 
       if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
@@ -337,6 +349,8 @@ function getRoiCanvas(){
 }
 
 function assetToHTML(a){
+  // แสดงตามลำดับที่พี่ต้องการ
+  // หมายเหตุ: เพิ่ม "บาท" เฉพาะช่องมูลค่า
   return `
     <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
     <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
@@ -369,6 +383,7 @@ async function loopScan(){
       const items = ASSETS_BASE.get(base);
       if(items && items.length>0){
         locked=true;
+
         if(items.length===1){
           overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${assetToHTML(items[0])}`;
         }else{
@@ -379,6 +394,7 @@ async function loopScan(){
             <ul class="asset-list">${lis}</ul>
           `;
         }
+
         try{navigator.vibrate?.(120);}catch{}
         try{ding.currentTime=0; ding.play().catch(()=>{});}catch{}
         btnUnlock.disabled=false;
