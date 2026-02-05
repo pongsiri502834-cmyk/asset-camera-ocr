@@ -87,39 +87,39 @@ function normalizeBase(str){
   return m ? m[0] : "";
 }
 
-/* โครงข้อมูลที่เราจะใช้แสดง */
+/* โครงข้อมูลที่จะแสดงตามคำสั่งของพี่ (B,D,I,K,N,L) */
 function makeAssetFromRow(c){
   // mapping: B(1), D(3), I(8), K(10), N(13), L(11)
-  const codeB = ((c[1]  ?? "")+"").trim();   // B
+  const codeB = ((c[1]  ?? "")+"").trim();   // B → รหัส
   const base  = normalizeBase(codeB);
   if(!base) return null;
 
-  const detailD = ((c[3]  ?? "")+"").trim(); // D
-  const priceI  = ((c[8]  ?? "")+"").trim(); // I
-  const keeperK = ((c[10] ?? "")+"").trim(); // K (ชื่อผู้ดูแลครอบครอง)
-  const colN    = ((c[13] ?? "")+"").trim(); // N
-  const colL    = ((c[11] ?? "")+"").trim(); // L
+  const detailD = ((c[3]  ?? "")+"").trim(); // D → รายละเอียด
+  const priceI  = ((c[8]  ?? "")+"").trim(); // I → มูลค่า
+  const keeperK = ((c[10] ?? "")+"").trim(); // K → ชื่อผู้ครอบครอง
+  const bookN   = ((c[13] ?? "")+"").trim(); // N → มูลค่าตามบัญชี
+  const statusL = ((c[11] ?? "")+"").trim(); // L → สถานะ
 
   return {
-    base,       // เลขฐานสำหรับค้นหา
-    codeB,      // รหัสเต็มจากคอลัมน์ B
+    base,       // เลขฐาน
+    codeB,      // รหัส
     detailD,    // รายละเอียด
     priceI,     // มูลค่า
-    keeperK,    // ผู้ดูแลครอบครอง
-    colN,       // ค่าจากคอลัมน์ N
-    colL        // ค่าจากคอลัมน์ L
+    keeperK,    // ชื่อผู้ครอบครอง
+    bookN,      // มูลค่าตามบัญชี
+    statusL     // สถานะ
   };
 }
 
-/* แปลงเป็น HTML ตามลำดับที่ต้องการ: B → D → I → K → N → L */
+/* แปลงเป็น HTML ตามลำดับและชื่อหัวข้อที่กำหนด */
 function assetToHTML(a){
   return `
-    <b>รหัส (B):</b> ${escapeHTML(a.codeB)}<br>
-    <b>รายละเอียด (D):</b> ${escapeHTML(a.detailD)}<br>
-    <b>มูลค่า (I):</b> ${escapeHTML(a.priceI)} บาท<br>
-    <b>ผู้ดูแลครอบครอง (K):</b> ${escapeHTML(a.keeperK)}<br>
-    <b>N:</b> ${escapeHTML(a.colN)}<br>
-    <b>L:</b> ${escapeHTML(a.colL)}
+    <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
+    <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
+    <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
+    <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
+    <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
+    <b>สถานะ:</b> ${escapeHTML(a.statusL)}
   `;
 }
 
@@ -143,7 +143,7 @@ async function loadSheet(){
       ASSETS_BASE.get(a.base).push(a);
       count++;
     }
-    statusEl.innerText = `โหลดข้อมูลเรียบร้อย • รายการอ่านได้: ${count.toLocaleString()} แถว • เลขฐาน: ${ASSETS_BASE.size.toLocaleString()} ค่า`;
+    statusEl.innerText = `โหลดข้อมูลเรียบร้อย • แถว: ${count.toLocaleString()} • เลขฐาน: ${ASSETS_BASE.size.toLocaleString()}`;
   }catch(e){
     console.error(e);
     statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ";
@@ -211,7 +211,7 @@ function getRoiCanvas(){
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(video, roiX,roiY,roiW,roiH, 0,0,roiW,roiH);
 
-  // preprocess: grayscale + contrast
+  // preprocess: grayscale + contrast เล็กน้อย
   const img=ctx.getImageData(0,0,roiW,roiH); const d=img.data;
   for(let i=0;i<d.length;i+=4){
     const gray=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
