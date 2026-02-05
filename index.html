@@ -27,7 +27,6 @@
     border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
 
-  /* กรอบ ROI ช่วยเล็ง */
   .roi { position:fixed; inset:0; pointer-events:none; z-index:5; }
   .roi::before{
     content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -66,14 +65,24 @@
 const SHEET_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-/** ดึงคอลัมน์แบบ “ตัวอักษรคอลัมน์” ตายตัว */
-const COL = {
+/** อ้างอิงด้วย “ตัวอักษรคอลัมน์” */
+const COLS = {
   CODE:   'B',   // รหัส
   DETAIL: 'D',   // รายละเอียด
   PRICE:  'I',   // มูลค่า
   BOOK:   'N',   // มูลค่าตามบัญชี
   KEEPER: 'K',   // ชื่อผู้ครอบครอง
   STATUS: 'L'    // สถานะ
+};
+
+/** (ถ้ามี) ใส่ชื่อหัวคอลัมน์จริง เพื่อความชัวร์ยิ่งขึ้น */
+const HEADERS = {
+  CODE:   "", // เช่น "รหัส"
+  DETAIL: "", // เช่น "รายละเอียด"
+  PRICE:  "", // เช่น "มูลค่า"
+  BOOK:   "", // เช่น "มูลค่าตามบัญชี"
+  KEEPER: "", // เช่น "ชื่อผู้ครอบครอง"
+  STATUS: ""  // เช่น "สถานะ"
 };
 
 /* ==============================
@@ -102,36 +111,57 @@ function colLetterToIndex(letter){
   const s = (letter||"").toUpperCase().trim();
   let n = 0;
   for (let i=0; i<s.length; i++){
-    n = n*26 + (s.charCodeAt(i)-64); // A=1
+    n = n*26 + (s.charCodeAt(i)-64);
   }
-  return n-1; // ให้ A=0
+  return n-1;
 }
-
-/** ดึงค่าในแถวตามตัวอักษรคอลัมน์ (header:false) */
-function pickByLetter(rowArray, letter){
-  const idx = colLetterToIndex(letter);
-  return (rowArray[idx] ?? "");
+/** header helper */
+function getByHeader(rowObj, headerName){
+  if(!headerName) return undefined;
+  const keys = Object.keys(rowObj);
+  const target = headerName.replace(/\s+/g,'').toLowerCase();
+  for (const k of keys){
+    const norm = k.replace(/\s+/g,'').toLowerCase();
+    if (norm === target) return rowObj[k];
+  }
+  return undefined;
 }
-
-/** รูปแบบแสดงผล */
-function assetToHTML(a){
-  return `
-    <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
-    <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
-    <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
-    <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
-    <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
-    <b>สถานะ:</b> ${escapeHTML(a.statusL)}
-  `;
+/** pick value (object with header OR array with index) */
+function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
+  if (!Array.isArray(rowObjOrArr)) {
+    const v = getByHeader(rowObjOrArr, headerName);
+    if (v !== undefined && v !== null && v !== "") return v;
+    if (headerMap && fallbackColLetter) {
+      const headerKey = headerMap[fallbackColLetter];
+      if (headerKey && rowObjOrArr[headerKey] !== undefined) return rowObjOrArr[headerKey];
+    }
+    return "";
+  }
+  const idx = colLetterToIndex(fallbackColLetter);
+  return (rowObjOrArr[idx] ?? "");
+}
+/** เช็คว่าเป็น “ตัวเลขเงิน” ไหม */
+function looksLikeNumber(x){
+  return typeof x === "string"
+    ? !!x.trim() && /^[\d.,]+$/.test(x.trim())
+    : typeof x === "number";
+}
+/** ปรับรูปแบบเลข: ตัดคอมมา, เว้นจุดทศนิยม */
+function normalizeNumberStr(x){
+  const s = (x ?? "").toString().trim();
+  if (!s) return s;
+  // แปลง 7,943.93 -> 7943.93 (เก็บแสดงพร้อมคอมมาอีกที หรือแสดงดิบก็ได้)
+  const cleaned = s.replace(/,/g,'');
+  return cleaned;
 }
 
 /* ==============================
    Data store
    ============================== */
-const ASSETS_BASE = new Map(); // key: baseNumber, value: Array<asset>
+const ASSETS_BASE = new Map(); // key: base, value: Array<asset>
 
 /* ==============================
-   1) โหลดชีต (บังคับ header:false)
+   โหลดชีต
    ============================== */
 async function loadSheet(){
   try{
@@ -139,25 +169,82 @@ async function loadSheet(){
     if(!res.ok) throw new Error("HTTP "+res.status);
     const text = await res.text();
 
-    const parsed = Papa.parse(text, { header:false, skipEmptyLines:true });
+    // พยายามใช้ header ก่อน
+    let parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+    let useHeader = true;
+
+    if (!parsed.data || !parsed.data.length || Object.keys(parsed.data[0]).length <= 1) {
+      parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
+      useHeader = false;
+    }
+
+    // map letter -> headerKey (เมื่อ header:true)
+    const headerMap = {};
+    if (useHeader) {
+      const fields = parsed.meta.fields || [];
+      fields.forEach((k, i) => {
+        const letter = String.fromCharCode(65 + i); // 65='A'
+        headerMap[letter] = k;
+      });
+    }
+
     const rows = parsed.data;
-
-    // ข้ามแถวแรกซึ่งเป็นหัวตาราง
     let count = 0;
-    for (let i=1; i<rows.length; i++){
-      const r = rows[i];
 
-      const codeB  = pickByLetter(r, COL.CODE).toString().trim();   // B
-      const base   = normalizeBase(codeB);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+
+      const codeB = useHeader
+        ? pickValue(row, HEADERS.CODE,   COLS.CODE,   headerMap)
+        : pickValue(row, "",            COLS.CODE);
+      const base = normalizeBase(codeB);
       if (!base) continue;
 
-      const detailD = pickByLetter(r, COL.DETAIL).toString().trim(); // D
-      const priceI  = pickByLetter(r, COL.PRICE).toString().trim();  // I
-      const bookN   = pickByLetter(r, COL.BOOK).toString().trim();   // N
-      const keeperK = pickByLetter(r, COL.KEEPER).toString().trim(); // K
-      const statusL = pickByLetter(r, COL.STATUS).toString().trim(); // L
+      const detailD = useHeader
+        ? pickValue(row, HEADERS.DETAIL, COLS.DETAIL, headerMap)
+        : pickValue(row, "",            COLS.DETAIL);
 
-      const asset = { base, codeB, detailD, priceI, bookN, keeperK, statusL };
+      const priceI = useHeader
+        ? pickValue(row, HEADERS.PRICE,  COLS.PRICE,  headerMap)
+        : pickValue(row, "",            COLS.PRICE);
+
+      let bookN = useHeader
+        ? pickValue(row, HEADERS.BOOK,   COLS.BOOK,   headerMap)
+        : pickValue(row, "",            COLS.BOOK);
+
+      let keeperK = useHeader
+        ? pickValue(row, HEADERS.KEEPER, COLS.KEEPER, headerMap)
+        : pickValue(row, "",            COLS.KEEPER);
+
+      const statusL = useHeader
+        ? pickValue(row, HEADERS.STATUS, COLS.STATUS, headerMap)
+        : pickValue(row, "",            COLS.STATUS);
+
+      // ---------- Heuristic กันคอลัมน์สลับ ----------
+      // ถ้า bookN เป็น "ชื่อคน" (มีตัวอักษร) และ keeperK เป็น "ตัวเลข" ให้สลับกัน
+      const bookLooksNumeric   = looksLikeNumber(bookN);
+      const keeperLooksNumeric = looksLikeNumber(keeperK);
+      const bookLooksText      = /[^\d.,]/.test((bookN ?? "").toString());
+      const keeperLooksText    = /[^\d.,]/.test((keeperK ?? "").toString());
+
+      if (!bookLooksNumeric && keeperLooksNumeric && bookLooksText) {
+        // สลับ
+        const tmp = bookN; bookN = keeperK; keeperK = tmp;
+      }
+
+      // ฟอร์แมตตัวเลขให้ดูสะอาด (เก็บโชว์มีคอมม่าเดิมหรือไม่ก็ได้)
+      const priceShow = (priceI ?? "").toString().trim();
+      const bookShow  = (bookN ?? "").toString().trim();
+
+      const asset = {
+        base,
+        codeB:    (codeB ?? "").toString().trim(),
+        detailD:  (detailD ?? "").toString().trim(),
+        priceI:   priceShow,
+        bookN:    bookShow,
+        keeperK:  (keeperK ?? "").toString().trim(),
+        statusL:  (statusL ?? "").toString().trim()
+      };
 
       if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
       ASSETS_BASE.get(base).push(asset);
@@ -172,7 +259,7 @@ async function loadSheet(){
 }
 
 /* ==============================
-   2) กล้อง & ไฟฉาย
+   กล้อง & ไฟฉาย
    ============================== */
 let track=null, torchOn=false;
 async function initCamera(){
@@ -206,7 +293,7 @@ btnToggleTorch.addEventListener("click", async ()=>{
 });
 
 /* ==============================
-   3) Tesseract Worker
+   Tesseract
    ============================== */
 let worker, workerReady=false;
 async function initOcr(){
@@ -219,7 +306,7 @@ async function initOcr(){
 }
 
 /* ==============================
-   4) Scan loop (ROI + debounce)
+   Scan loop
    ============================== */
 let locked=false, lastRun=0;
 const SCAN_INTERVAL_MS = 1200;
@@ -249,10 +336,14 @@ function getRoiCanvas(){
   return canvas;
 }
 
-function renderAsset(a){
-  overlay.innerHTML = `
-    ✅ พบข้อมูลสินทรัพย์<br><br>
-    ${assetToHTML(a)}
+function assetToHTML(a){
+  return `
+    <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
+    <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
+    <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
+    <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
+    <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
+    <b>สถานะ:</b> ${escapeHTML(a.statusL)}
   `;
 }
 
@@ -279,7 +370,7 @@ async function loopScan(){
       if(items && items.length>0){
         locked=true;
         if(items.length===1){
-          renderAsset(items[0]);
+          overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${assetToHTML(items[0])}`;
         }else{
           const lis = items.map(a=>`<li>${assetToHTML(a)}</li>`).join("");
           overlay.innerHTML = `
@@ -288,7 +379,6 @@ async function loopScan(){
             <ul class="asset-list">${lis}</ul>
           `;
         }
-
         try{navigator.vibrate?.(120);}catch{}
         try{ding.currentTime=0; ding.play().catch(()=>{});}catch{}
         btnUnlock.disabled=false;
