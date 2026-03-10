@@ -51,7 +51,7 @@
   </div>
 
   <div class="roi" aria-hidden="true"></div>
-  <video id="video" autoplay playsinline></video>
+  <video id="video" autoplay playsinline muted></video>
   <div id="overlay">รอการสแกน…</div>
 
   <audio id="ding" preload="auto">
@@ -78,12 +78,12 @@ const COLS = {
 
 /** (ถ้ามี) ใส่ชื่อหัวคอลัมน์จริง เพื่อความชัวร์ยิ่งขึ้น */
 const HEADERS = {
-  CODE:   "",              // เช่น "รหัส"
-  DETAIL: "",             // เช่น "รายละเอียด"
-  PRICE:  "",             // เช่น "มูลค่า"
-  BOOK:   "",             // เช่น "มูลค่าตามบัญชี"
-  KEEPER: "",             // เช่น "ชื่อผู้ครอบครอง"
-  STATUS: "",             // เช่น "สถานะ"
+  CODE:   "",               // เช่น "รหัส"
+  DETAIL: "",              // เช่น "รายละเอียด"
+  PRICE:  "",              // เช่น "มูลค่า"
+  BOOK:   "",              // เช่น "มูลค่าตามบัญชี"
+  KEEPER: "",              // เช่น "ชื่อผู้ครอบครอง"
+  STATUS: "",              // เช่น "สถานะ"
   MANUF:  "หมายเลขผู้ผลิต" // ชื่อหัวคอลัมน์ภาษาไทยในชีต
 };
 
@@ -150,18 +150,10 @@ function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
   const idx = colLetterToIndex(fallbackColLetter);
   return (rowObjOrArr[idx] ?? "");
 }
-/** เช็คว่าเป็น “ตัวเลขเงิน” ไหม */
 function looksLikeNumber(x){
   return typeof x === "string"
     ? !!x.trim() && /^[\d.,]+$/.test(x.trim())
     : typeof x === "number";
-}
-/** ปรับรูปแบบเลข: ตัดคอมมา, เว้นจุดทศนิยม */
-function normalizeNumberStr(x){
-  const s = (x ?? "").toString().trim();
-  if (!s) return s;
-  const cleaned = s.replace(/,/g,'');
-  return cleaned;
 }
 
 /* ==============================
@@ -238,7 +230,6 @@ async function loadSheet(){
       const bookLooksNumeric   = looksLikeNumber(bookN);
       const keeperLooksNumeric = looksLikeNumber(keeperK);
       const bookLooksText      = /[^\d.,]/.test((bookN ?? "").toString());
-      const keeperLooksText    = /[^\d.,]/.test((keeperK ?? "").toString());
 
       if (!bookLooksNumeric && keeperLooksNumeric && bookLooksText) {
         const tmp = bookN; bookN = keeperK; keeperK = tmp;
@@ -252,7 +243,7 @@ async function loadSheet(){
         bookN:    (bookN ?? "").toString().trim(),
         keeperK:  (keeperK ?? "").toString().trim(),
         statusL:  (statusL ?? "").toString().trim(),
-        manufG:   (manufG ?? "").toString().trim() // (ใหม่) เก็บหมายเลขผู้ผลิต
+        manufG:   (manufG ?? "").toString().trim() // (ใหม่)
       };
 
       if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
@@ -264,6 +255,7 @@ async function loadSheet(){
   }catch(e){
     console.error(e);
     statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ";
+    overlay.innerHTML = `<span class="small">รายละเอียดข้อผิดพลาด: ${escapeHTML(e.message||String(e))}</span>`;
   }
 }
 
@@ -273,8 +265,9 @@ async function loadSheet(){
 let track=null, torchOn=false;
 async function initCamera(){
   try{
-    video.muted = true;       // ช่วยให้ autoplay ได้บน iOS
-    video.playsInline = true; // เล่นแบบ in-page
+    // เพื่อให้ autoplay ได้บน iOS ต้อง muted + playsInline
+    video.muted = true;
+    video.playsInline = true;
 
     const stream = await navigator.mediaDevices.getUserMedia({
       video:{
@@ -299,6 +292,7 @@ async function initCamera(){
   }catch(err){
     console.error(err);
     statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + (err.message||err);
+    overlay.innerHTML = `<span class="small">ตรวจสอบว่าอนุญาตสิทธิ์กล้องแล้วหรือยัง (HTTPS/localhost)</span>`;
   }
 }
 btnToggleTorch.addEventListener("click", async ()=>{
@@ -317,16 +311,22 @@ btnToggleTorch.addEventListener("click", async ()=>{
    ============================== */
 let worker, workerReady=false;
 async function initOcr(){
-  worker = await Tesseract.createWorker({ logger: () => {} });
-  await worker.loadLanguage('eng');
-  await worker.initialize('eng');
-  await worker.setParameters({
-    tessedit_char_whitelist:"0123456789",
-    classify_bln_numeric_mode:"1",
-    tessedit_pageseg_mode:"7", // single line
-    user_defined_dpi:"220"     // ช่วยความคม
-  });
-  workerReady = true;
+  try{
+    worker = await Tesseract.createWorker({ logger: () => {} });
+    await worker.loadLanguage('eng');
+    await worker.initialize('eng');
+    await worker.setParameters({
+      tessedit_char_whitelist:"0123456789",
+      classify_bln_numeric_mode:"1",
+      tessedit_pageseg_mode:"7", // single line
+      user_defined_dpi:"220"     // ช่วยความคม
+    });
+    workerReady = true;
+  }catch(e){
+    console.error(e);
+    statusEl.innerText += " • OCR มีปัญหา";
+    overlay.innerHTML = `<span class="small">โหลด Tesseract ไม่สำเร็จ: ${escapeHTML(e.message||String(e))}</span>`;
+  }
 }
 
 /* ==============================
@@ -429,6 +429,7 @@ async function loopScan(){
     }
   }catch(e){
     console.error("OCR error:", e);
+    overlay.innerHTML = `<span class="small">OCR มีปัญหา: ${escapeHTML(e.message||String(e))}</span>`;
   }
 }
 
