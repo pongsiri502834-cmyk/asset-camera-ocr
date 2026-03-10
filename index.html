@@ -72,17 +72,19 @@ const COLS = {
   PRICE:  'I',   // มูลค่า
   BOOK:   'N',   // มูลค่าตามบัญชี
   KEEPER: 'K',   // ชื่อผู้ครอบครอง
-  STATUS: 'L'    // สถานะ
+  STATUS: 'L',   // สถานะ
+  MANUF:  'G'    // หมายเลขผู้ผลิต (เพิ่ม)
 };
 
 /** (ถ้ามี) ใส่ชื่อหัวคอลัมน์จริง เพื่อความชัวร์ยิ่งขึ้น */
 const HEADERS = {
-  CODE:   "", // เช่น "รหัส"
-  DETAIL: "", // เช่น "รายละเอียด"
-  PRICE:  "", // เช่น "มูลค่า"
-  BOOK:   "", // เช่น "มูลค่าตามบัญชี"
-  KEEPER: "", // เช่น "ชื่อผู้ครอบครอง"
-  STATUS: ""  // เช่น "สถานะ"
+  CODE:   "",              // เช่น "รหัส"
+  DETAIL: "",             // เช่น "รายละเอียด"
+  PRICE:  "",             // เช่น "มูลค่า"
+  BOOK:   "",             // เช่น "มูลค่าตามบัญชี"
+  KEEPER: "",             // เช่น "ชื่อผู้ครอบครอง"
+  STATUS: "",             // เช่น "สถานะ"
+  MANUF:  "หมายเลขผู้ผลิต" // ชื่อหัวคอลัมน์ภาษาไทยในชีต
 };
 
 /* ==============================
@@ -99,12 +101,20 @@ const ding = document.getElementById("ding");
    Utils
    ============================== */
 function escapeHTML(str){
-  return (str??"").toString()
-   .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-   .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+  return (str ?? "").toString()
+   .replace(/&/g,"&amp;")
+   .replace(/</g,"&lt;")
+   .replace(/>/g,"&gt;")
+   .replace(/"/g,"&quot;")
+   .replace(/'/g,"&#039;");
+}
+const THAI_DIGITS = { '๐':'0','๑':'1','๒':'2','๓':'3','๔':'4','๕':'5','๖':'6','๗':'7','๘':'8','๙':'9' };
+function toArabicDigits(s){
+  return (s ?? "").replace(/[๐-๙]/g, ch => THAI_DIGITS[ch] || ch);
 }
 function normalizeBase(str){
-  const m = ((str??"")+"").match(/\d{8,9}/);
+  const cleaned = toArabicDigits((str ?? "")).replace(/[^\d]/g, "");
+  const m = cleaned.match(/\d{8,9}/); // ปรับช่วงหลักตามรูปแบบรหัสจริง
   return m ? m[0] : "";
 }
 function colLetterToIndex(letter){
@@ -150,7 +160,6 @@ function looksLikeNumber(x){
 function normalizeNumberStr(x){
   const s = (x ?? "").toString().trim();
   if (!s) return s;
-  // แปลง 7,943.93 -> 7943.93 (เก็บแสดงพร้อมคอมมาอีกที หรือแสดงดิบก็ได้)
   const cleaned = s.replace(/,/g,'');
   return cleaned;
 }
@@ -181,7 +190,7 @@ async function loadSheet(){
     // map letter -> headerKey (เมื่อ header:true)
     const headerMap = {};
     if (useHeader) {
-      const fields = parsed.meta.fields || [];
+      const fields = (parsed.meta.fields || []).map(f => (f||"").trim());
       fields.forEach((k, i) => {
         const letter = String.fromCharCode(65 + i); // 65='A'
         headerMap[letter] = k;
@@ -220,30 +229,30 @@ async function loadSheet(){
         ? pickValue(row, HEADERS.STATUS, COLS.STATUS, headerMap)
         : pickValue(row, "",            COLS.STATUS);
 
+      // (ใหม่) อ่านคอลัมน์ G: หมายเลขผู้ผลิต
+      const manufG = useHeader
+        ? pickValue(row, HEADERS.MANUF,  COLS.MANUF,  headerMap)
+        : pickValue(row, "",             COLS.MANUF);
+
       // ---------- Heuristic กันคอลัมน์สลับ ----------
-      // ถ้า bookN เป็น "ชื่อคน" (มีตัวอักษร) และ keeperK เป็น "ตัวเลข" ให้สลับกัน
       const bookLooksNumeric   = looksLikeNumber(bookN);
       const keeperLooksNumeric = looksLikeNumber(keeperK);
       const bookLooksText      = /[^\d.,]/.test((bookN ?? "").toString());
       const keeperLooksText    = /[^\d.,]/.test((keeperK ?? "").toString());
 
       if (!bookLooksNumeric && keeperLooksNumeric && bookLooksText) {
-        // สลับ
         const tmp = bookN; bookN = keeperK; keeperK = tmp;
       }
-
-      // ฟอร์แมตตัวเลขให้ดูสะอาด (เก็บโชว์มีคอมม่าเดิมหรือไม่ก็ได้)
-      const priceShow = (priceI ?? "").toString().trim();
-      const bookShow  = (bookN ?? "").toString().trim();
 
       const asset = {
         base,
         codeB:    (codeB ?? "").toString().trim(),
         detailD:  (detailD ?? "").toString().trim(),
-        priceI:   priceShow,
-        bookN:    bookShow,
+        priceI:   (priceI ?? "").toString().trim(),
+        bookN:    (bookN ?? "").toString().trim(),
         keeperK:  (keeperK ?? "").toString().trim(),
-        statusL:  (statusL ?? "").toString().trim()
+        statusL:  (statusL ?? "").toString().trim(),
+        manufG:   (manufG ?? "").toString().trim() // (ใหม่) เก็บหมายเลขผู้ผลิต
       };
 
       if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
@@ -264,11 +273,22 @@ async function loadSheet(){
 let track=null, torchOn=false;
 async function initCamera(){
   try{
+    video.muted = true;       // ช่วยให้ autoplay ได้บน iOS
+    video.playsInline = true; // เล่นแบบ in-page
+
     const stream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} },
+      video:{
+        facingMode:{ideal:"environment"},
+        width:{ideal:1920}, height:{ideal:1080},
+        advanced: [
+          { focusMode: "continuous" }, // ถ้ารองรับ
+          { zoom: 1.5 }                // ถ้ารองรับ
+        ]
+      },
       audio:false
     });
     video.srcObject = stream;
+    await video.play().catch(()=>{});
     statusEl.innerText = "กล้องพร้อมใช้งาน";
     track = stream.getVideoTracks()[0];
 
@@ -293,14 +313,18 @@ btnToggleTorch.addEventListener("click", async ()=>{
 });
 
 /* ==============================
-   Tesseract
+   Tesseract (v5 API ที่ถูกต้อง)
    ============================== */
 let worker, workerReady=false;
 async function initOcr(){
-  worker = await Tesseract.createWorker("eng",1,{logger:()=>{}});
+  worker = await Tesseract.createWorker({ logger: () => {} });
+  await worker.loadLanguage('eng');
+  await worker.initialize('eng');
   await worker.setParameters({
     tessedit_char_whitelist:"0123456789",
-    classify_bln_numeric_mode:"1"
+    classify_bln_numeric_mode:"1",
+    tessedit_pageseg_mode:"7", // single line
+    user_defined_dpi:"220"     // ช่วยความคม
   });
   workerReady = true;
 }
@@ -310,26 +334,41 @@ async function initOcr(){
    ============================== */
 let locked=false, lastRun=0;
 const SCAN_INTERVAL_MS = 1200;
+let pageActive = true;
+document.addEventListener('visibilitychange', () => {
+  pageActive = !document.hidden;
+});
 
-function getRoiCanvas(){
+function getRoiCanvas(forOcr = false){
   const vw=video.videoWidth, vh=video.videoHeight;
   if(!vw||!vh) return null;
 
   const roiW=Math.floor(vw*0.60), roiH=Math.floor(vh*0.30);
   const roiX=Math.floor((vw-roiW)/2), roiY=Math.floor((vh-roiH)/2);
 
+  const scale = forOcr ? 1.6 : 1.0;
+  const W = Math.round(roiW * scale), H = Math.round(roiH * scale);
+
   const canvas=document.createElement("canvas");
-  canvas.width=roiW; canvas.height=roiH;
+  canvas.width=W; canvas.height=H;
 
-  const ctx=canvas.getContext("2d");
+  const ctx=canvas.getContext("2d", { willReadFrequently: true });
   ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(video, roiX,roiY,roiW,roiH, 0,0,roiW,roiH);
+  ctx.drawImage(video, roiX,roiY,roiW,roiH, 0,0,W,H);
 
-  // grayscale + contrast
-  const img=ctx.getImageData(0,0,roiW,roiH); const d=img.data;
+  // grayscale + adaptive threshold แบบง่าย
+  const img=ctx.getImageData(0,0,W,H); const d=img.data;
+  let sum=0;
   for(let i=0;i<d.length;i+=4){
     const gray=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
-    const v=Math.max(0,Math.min(255,(gray-128)*1.2+128));
+    sum+=gray;
+  }
+  const mean = sum / (d.length/4);
+  const T = mean * 0.92; // ลดนิดให้เข้มขึ้น
+
+  for(let i=0;i<d.length;i+=4){
+    const gray=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
+    const v = gray < T ? 0 : 255;
     d[i]=d[i+1]=d[i+2]=v;
   }
   ctx.putImageData(img,0,0);
@@ -343,19 +382,21 @@ function assetToHTML(a){
     <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
     <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
     <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
-    <b>สถานะ:</b> ${escapeHTML(a.statusL)}
+    <b>สถานะ:</b> ${escapeHTML(a.statusL)}<br>
+    <b>หมายเลขผู้ผลิต:</b> ${escapeHTML(a.manufG)}
   `;
 }
 
 async function loopScan(){
   const now=Date.now();
+  if (!pageActive) return;
   if(!workerReady||locked) return;
   if(now-lastRun<SCAN_INTERVAL_MS) return;
   if(video.readyState<2||video.videoWidth===0) return;
 
   lastRun=now;
 
-  const canvas=getRoiCanvas();
+  const canvas=getRoiCanvas(true);
   if(!canvas) return;
 
   try{
@@ -397,8 +438,13 @@ btnUnlock.addEventListener("click", ()=>{
 setInterval(loopScan,200);
 
 /* ==============================
-   Start
+   Cleanup & Start
    ============================== */
+window.addEventListener('beforeunload', () => {
+  try { track?.stop(); } catch {}
+  try { worker?.terminate(); } catch {}
+});
+
 (async function main(){
   await loadSheet();
   await initCamera();
