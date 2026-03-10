@@ -5,406 +5,288 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Asset Camera Scanner</title>
 
-<!-- Tesseract.js v5 -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<!-- PapaParse -->
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
 <style>
-  :root { --accent:#00ff88; }
-  body { margin:0; font-family:Arial, system-ui, sans-serif; background:#000; color:#fff; }
-  video { width:100vw; height:100vh; object-fit:cover; display:block; }
+:root{--accent:#00ff88;}
+body{margin:0;font-family:Arial;background:#000;color:#fff;}
+video{width:100vw;height:100vh;object-fit:cover;}
 
-  #status { position:fixed; top:0; left:0; right:0; z-index:10;
-    background:rgba(0,0,0,.7); color:#fff; padding:8px 12px; font-size:14px; }
+#status{
+position:fixed;top:0;left:0;right:0;
+background:rgba(0,0,0,.7);
+padding:8px;font-size:14px;
+}
 
-  #overlay { position:fixed; bottom:0; left:0; right:0; z-index:10;
-    background:rgba(0,0,0,.85); color:var(--accent);
-    padding:10px; font-size:15px; max-height:45%; overflow:auto; }
+#overlay{
+position:fixed;bottom:0;left:0;right:0;
+background:rgba(0,0,0,.85);
+color:var(--accent);
+padding:10px;font-size:15px;
+max-height:45%;overflow:auto;
+}
 
-  #toolbar { position:fixed; top:44px; right:10px; z-index:11; display:flex; gap:8px; flex-wrap:wrap; }
-  .btn { background:rgba(0,0,0,.6); color:#fff; border:1px solid var(--accent);
-    border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; }
-  .btn:disabled { opacity:.5; cursor:not-allowed; }
-
-  .roi { position:fixed; inset:0; pointer-events:none; z-index:5; }
-  .roi::before{
-    content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    width:60vw; height:30vh; border:2px dashed rgba(0,255,136,.9);
-    box-shadow:0 0 0 9999px rgba(0,0,0,.35) inset, 0 0 12px rgba(0,255,136,.5);
-    border-radius:8px;
-  }
-
-  .small{ color:#ccc; font-size:12px; }
-  .hr { height:1px; border:0; background:rgba(255,255,255,.1); margin:8px 0; }
-  ul.asset-list { margin:6px 0 0 18px; padding:0; }
-  ul.asset-list li { margin-bottom:10px; }
+.roi{position:fixed;inset:0;pointer-events:none;}
+.roi::before{
+content:"";
+position:absolute;
+left:50%;top:50%;
+transform:translate(-50%,-50%);
+width:60vw;height:30vh;
+border:2px dashed #00ff88;
+}
 </style>
 </head>
 
 <body>
-  <div id="status">กำลังโหลดข้อมูล…</div>
 
-  <div id="toolbar">
-    <button id="btnToggleTorch" class="btn" disabled>🔦 เปิดไฟฉาย</button>
-    <button id="btnUnlock" class="btn" disabled>🔁 สแกนใหม่</button>
-  </div>
+<div id="status">กำลังโหลดข้อมูล…</div>
 
-  <div class="roi" aria-hidden="true"></div>
-  <video id="video" autoplay playsinline></video>
-  <div id="overlay">รอการสแกน…</div>
+<div class="roi"></div>
 
-  <audio id="ding" preload="auto">
-    <source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3" type="audio/mpeg">
-  </audio>
+<video id="video" autoplay playsinline></video>
+
+<div id="overlay">รอการสแกน…</div>
 
 <script>
-/* ==============================
-   CONFIG
-   ============================== */
+
+/* =======================
+CONFIG
+======================= */
+
 const SHEET_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
+"https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-/** อ้างอิงด้วย “ตัวอักษรคอลัมน์” */
-const COLS = {
-  CODE:   'B',   // รหัส
-  DETAIL: 'D',   // รายละเอียด
-  PRICE:  'I',   // มูลค่า
-  BOOK:   'N',   // มูลค่าตามบัญชี
-  KEEPER: 'K',   // ชื่อผู้ครอบครอง
-  STATUS: 'L'    // สถานะ
+const COLS={
+CODE:'B',
+DETAIL:'D',
+PRICE:'I',
+BOOK:'N',
+KEEPER:'K',
+STATUS:'L',
+SERIAL:'G' // เพิ่มหมายเลขผู้ผลิต
 };
 
-/** (ถ้ามี) ใส่ชื่อหัวคอลัมน์จริง เพื่อความชัวร์ยิ่งขึ้น */
-const HEADERS = {
-  CODE:   "", // เช่น "รหัส"
-  DETAIL: "", // เช่น "รายละเอียด"
-  PRICE:  "", // เช่น "มูลค่า"
-  BOOK:   "", // เช่น "มูลค่าตามบัญชี"
-  KEEPER: "", // เช่น "ชื่อผู้ครอบครอง"
-  STATUS: ""  // เช่น "สถานะ"
-};
+/* =======================
+DOM
+======================= */
 
-/* ==============================
-   DOM
-   ============================== */
-const video   = document.getElementById("video");
-const overlay = document.getElementById("overlay");
-const statusEl  = document.getElementById("status");
-const btnUnlock = document.getElementById("btnUnlock");
-const btnToggleTorch = document.getElementById("btnToggleTorch");
-const ding = document.getElementById("ding");
+const video=document.getElementById("video");
+const overlay=document.getElementById("overlay");
+const statusEl=document.getElementById("status");
 
-/* ==============================
-   Utils
-   ============================== */
+/* =======================
+UTIL
+======================= */
+
 function escapeHTML(str){
-  return (str??"").toString()
-   .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-   .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+return(str??"").toString()
+.replace(/&/g,"&amp;")
+.replace(/</g,"&lt;")
+.replace(/>/g,"&gt;");
 }
+
 function normalizeBase(str){
-  const m = ((str??"")+"").match(/\d{8,9}/);
-  return m ? m[0] : "";
+const m=((str??"")+"").match(/\d{8,9}/);
+return m?m[0]:"";
 }
+
 function colLetterToIndex(letter){
-  const s = (letter||"").toUpperCase().trim();
-  let n = 0;
-  for (let i=0; i<s.length; i++){
-    n = n*26 + (s.charCodeAt(i)-64);
-  }
-  return n-1;
+const s=letter.toUpperCase();
+let n=0;
+for(let i=0;i<s.length;i++){
+n=n*26+(s.charCodeAt(i)-64);
 }
-/** header helper */
-function getByHeader(rowObj, headerName){
-  if(!headerName) return undefined;
-  const keys = Object.keys(rowObj);
-  const target = headerName.replace(/\s+/g,'').toLowerCase();
-  for (const k of keys){
-    const norm = k.replace(/\s+/g,'').toLowerCase();
-    if (norm === target) return rowObj[k];
-  }
-  return undefined;
-}
-/** pick value (object with header OR array with index) */
-function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
-  if (!Array.isArray(rowObjOrArr)) {
-    const v = getByHeader(rowObjOrArr, headerName);
-    if (v !== undefined && v !== null && v !== "") return v;
-    if (headerMap && fallbackColLetter) {
-      const headerKey = headerMap[fallbackColLetter];
-      if (headerKey && rowObjOrArr[headerKey] !== undefined) return rowObjOrArr[headerKey];
-    }
-    return "";
-  }
-  const idx = colLetterToIndex(fallbackColLetter);
-  return (rowObjOrArr[idx] ?? "");
-}
-/** เช็คว่าเป็น “ตัวเลขเงิน” ไหม */
-function looksLikeNumber(x){
-  return typeof x === "string"
-    ? !!x.trim() && /^[\d.,]+$/.test(x.trim())
-    : typeof x === "number";
-}
-/** ปรับรูปแบบเลข: ตัดคอมมา, เว้นจุดทศนิยม */
-function normalizeNumberStr(x){
-  const s = (x ?? "").toString().trim();
-  if (!s) return s;
-  // แปลง 7,943.93 -> 7943.93 (เก็บแสดงพร้อมคอมมาอีกที หรือแสดงดิบก็ได้)
-  const cleaned = s.replace(/,/g,'');
-  return cleaned;
+return n-1;
 }
 
-/* ==============================
-   Data store
-   ============================== */
-const ASSETS_BASE = new Map(); // key: base, value: Array<asset>
+/* =======================
+DATA STORE
+======================= */
 
-/* ==============================
-   โหลดชีต
-   ============================== */
+const ASSETS_BASE=new Map();
+
+/* =======================
+LOAD GOOGLE SHEET
+======================= */
+
 async function loadSheet(){
-  try{
-    const res = await fetch(SHEET_URL,{cache:"no-store"});
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    const text = await res.text();
 
-    // พยายามใช้ header ก่อน
-    let parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-    let useHeader = true;
+const res=await fetch(SHEET_URL);
+const text=await res.text();
 
-    if (!parsed.data || !parsed.data.length || Object.keys(parsed.data[0]).length <= 1) {
-      parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
-      useHeader = false;
-    }
+const parsed=Papa.parse(text,{header:false});
 
-    // map letter -> headerKey (เมื่อ header:true)
-    const headerMap = {};
-    if (useHeader) {
-      const fields = parsed.meta.fields || [];
-      fields.forEach((k, i) => {
-        const letter = String.fromCharCode(65 + i); // 65='A'
-        headerMap[letter] = k;
-      });
-    }
+const rows=parsed.data;
 
-    const rows = parsed.data;
-    let count = 0;
+let count=0;
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+for(let i=1;i<rows.length;i++){
 
-      const codeB = useHeader
-        ? pickValue(row, HEADERS.CODE,   COLS.CODE,   headerMap)
-        : pickValue(row, "",            COLS.CODE);
-      const base = normalizeBase(codeB);
-      if (!base) continue;
+const row=rows[i];
 
-      const detailD = useHeader
-        ? pickValue(row, HEADERS.DETAIL, COLS.DETAIL, headerMap)
-        : pickValue(row, "",            COLS.DETAIL);
+const codeB=row[colLetterToIndex(COLS.CODE)];
+const base=normalizeBase(codeB);
 
-      const priceI = useHeader
-        ? pickValue(row, HEADERS.PRICE,  COLS.PRICE,  headerMap)
-        : pickValue(row, "",            COLS.PRICE);
+if(!base)continue;
 
-      let bookN = useHeader
-        ? pickValue(row, HEADERS.BOOK,   COLS.BOOK,   headerMap)
-        : pickValue(row, "",            COLS.BOOK);
+const detailD=row[colLetterToIndex(COLS.DETAIL)];
+const priceI=row[colLetterToIndex(COLS.PRICE)];
+const bookN=row[colLetterToIndex(COLS.BOOK)];
+const keeperK=row[colLetterToIndex(COLS.KEEPER)];
+const statusL=row[colLetterToIndex(COLS.STATUS)];
+const serialG=row[colLetterToIndex(COLS.SERIAL)]; // เพิ่ม
 
-      let keeperK = useHeader
-        ? pickValue(row, HEADERS.KEEPER, COLS.KEEPER, headerMap)
-        : pickValue(row, "",            COLS.KEEPER);
+const asset={
+base,
+codeB:(codeB??"").trim(),
+detailD:(detailD??"").trim(),
+priceI:(priceI??"").trim(),
+bookN:(bookN??"").trim(),
+keeperK:(keeperK??"").trim(),
+statusL:(statusL??"").trim(),
+serialG:(serialG??"").trim() // เพิ่ม
+};
 
-      const statusL = useHeader
-        ? pickValue(row, HEADERS.STATUS, COLS.STATUS, headerMap)
-        : pickValue(row, "",            COLS.STATUS);
+if(!ASSETS_BASE.has(base))ASSETS_BASE.set(base,[]);
 
-      // ---------- Heuristic กันคอลัมน์สลับ ----------
-      // ถ้า bookN เป็น "ชื่อคน" (มีตัวอักษร) และ keeperK เป็น "ตัวเลข" ให้สลับกัน
-      const bookLooksNumeric   = looksLikeNumber(bookN);
-      const keeperLooksNumeric = looksLikeNumber(keeperK);
-      const bookLooksText      = /[^\d.,]/.test((bookN ?? "").toString());
-      const keeperLooksText    = /[^\d.,]/.test((keeperK ?? "").toString());
+ASSETS_BASE.get(base).push(asset);
 
-      if (!bookLooksNumeric && keeperLooksNumeric && bookLooksText) {
-        // สลับ
-        const tmp = bookN; bookN = keeperK; keeperK = tmp;
-      }
+count++;
 
-      // ฟอร์แมตตัวเลขให้ดูสะอาด (เก็บโชว์มีคอมม่าเดิมหรือไม่ก็ได้)
-      const priceShow = (priceI ?? "").toString().trim();
-      const bookShow  = (bookN ?? "").toString().trim();
-
-      const asset = {
-        base,
-        codeB:    (codeB ?? "").toString().trim(),
-        detailD:  (detailD ?? "").toString().trim(),
-        priceI:   priceShow,
-        bookN:    bookShow,
-        keeperK:  (keeperK ?? "").toString().trim(),
-        statusL:  (statusL ?? "").toString().trim()
-      };
-
-      if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
-      ASSETS_BASE.get(base).push(asset);
-      count++;
-    }
-
-    statusEl.innerText = `โหลดข้อมูลเรียบร้อย • แถว: ${count.toLocaleString()} • เลขฐาน: ${ASSETS_BASE.size.toLocaleString()}`;
-  }catch(e){
-    console.error(e);
-    statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ";
-  }
 }
 
-/* ==============================
-   กล้อง & ไฟฉาย
-   ============================== */
-let track=null, torchOn=false;
+statusEl.innerText="โหลดข้อมูลเรียบร้อย "+count+" รายการ";
+
+}
+
+/* =======================
+CAMERA
+======================= */
+
 async function initCamera(){
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} },
-      audio:false
-    });
-    video.srcObject = stream;
-    statusEl.innerText = "กล้องพร้อมใช้งาน";
-    track = stream.getVideoTracks()[0];
 
-    try{
-      const caps = track.getCapabilities?.() || {};
-      if("torch" in caps) btnToggleTorch.disabled = false;
-    }catch{}
-  }catch(err){
-    console.error(err);
-    statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + (err.message||err);
-  }
-}
-btnToggleTorch.addEventListener("click", async ()=>{
-  if(!track) return;
-  try{
-    const caps = track.getCapabilities?.() || {};
-    if(!("torch" in caps)) return;
-    torchOn = !torchOn;
-    await track.applyConstraints({advanced:[{torch:torchOn}]});
-    btnToggleTorch.textContent = torchOn ? "🔦 ปิดไฟฉาย" : "🔦 เปิดไฟฉาย";
-  }catch(e){ console.warn("Torch error:", e); }
+const stream=await navigator.mediaDevices.getUserMedia({
+video:{facingMode:"environment"}
 });
 
-/* ==============================
-   Tesseract
-   ============================== */
-let worker, workerReady=false;
-async function initOcr(){
-  worker = await Tesseract.createWorker("eng",1,{logger:()=>{}});
-  await worker.setParameters({
-    tessedit_char_whitelist:"0123456789",
-    classify_bln_numeric_mode:"1"
-  });
-  workerReady = true;
+video.srcObject=stream;
+
 }
 
-/* ==============================
-   Scan loop
-   ============================== */
-let locked=false, lastRun=0;
-const SCAN_INTERVAL_MS = 1200;
+/* =======================
+OCR
+======================= */
 
-function getRoiCanvas(){
-  const vw=video.videoWidth, vh=video.videoHeight;
-  if(!vw||!vh) return null;
+let worker;
 
-  const roiW=Math.floor(vw*0.60), roiH=Math.floor(vh*0.30);
-  const roiX=Math.floor((vw-roiW)/2), roiY=Math.floor((vh-roiH)/2);
+async function initOCR(){
 
-  const canvas=document.createElement("canvas");
-  canvas.width=roiW; canvas.height=roiH;
+worker=await Tesseract.createWorker("eng");
 
-  const ctx=canvas.getContext("2d");
-  ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(video, roiX,roiY,roiW,roiH, 0,0,roiW,roiH);
+await worker.setParameters({
+tessedit_char_whitelist:"0123456789"
+});
 
-  // grayscale + contrast
-  const img=ctx.getImageData(0,0,roiW,roiH); const d=img.data;
-  for(let i=0;i<d.length;i+=4){
-    const gray=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
-    const v=Math.max(0,Math.min(255,(gray-128)*1.2+128));
-    d[i]=d[i+1]=d[i+2]=v;
-  }
-  ctx.putImageData(img,0,0);
-  return canvas;
 }
+
+/* =======================
+ROI
+======================= */
+
+function getCanvas(){
+
+const vw=video.videoWidth;
+const vh=video.videoHeight;
+
+const roiW=Math.floor(vw*0.6);
+const roiH=Math.floor(vh*0.3);
+
+const roiX=Math.floor((vw-roiW)/2);
+const roiY=Math.floor((vh-roiH)/2);
+
+const canvas=document.createElement("canvas");
+canvas.width=roiW;
+canvas.height=roiH;
+
+const ctx=canvas.getContext("2d");
+
+ctx.drawImage(video,roiX,roiY,roiW,roiH,0,0,roiW,roiH);
+
+return canvas;
+
+}
+
+/* =======================
+HTML OUTPUT
+======================= */
 
 function assetToHTML(a){
-  return `
-    <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
-    <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
-    <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
-    <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
-    <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
-    <b>สถานะ:</b> ${escapeHTML(a.statusL)}
-  `;
+
+return`
+<b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
+<b>หมายเลขผู้ผลิต:</b> ${escapeHTML(a.serialG)}<br>
+<b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
+<b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
+<b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
+<b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
+<b>สถานะ:</b> ${escapeHTML(a.statusL)}
+`;
+
 }
 
-async function loopScan(){
-  const now=Date.now();
-  if(!workerReady||locked) return;
-  if(now-lastRun<SCAN_INTERVAL_MS) return;
-  if(video.readyState<2||video.videoWidth===0) return;
+/* =======================
+SCAN LOOP
+======================= */
 
-  lastRun=now;
+async function scan(){
 
-  const canvas=getRoiCanvas();
-  if(!canvas) return;
+if(video.videoWidth===0)return;
 
-  try{
-    const {data} = await worker.recognize(canvas);
-    const raw=(data.text||"").replace(/\s+/g," ").trim();
+const canvas=getCanvas();
 
-    overlay.innerHTML = `OCR อ่านได้:<br><span class="small">${escapeHTML(raw)}</span>`;
+const result=await worker.recognize(canvas);
 
-    const base = normalizeBase(raw);
-    if(base){
-      const items = ASSETS_BASE.get(base);
-      if(items && items.length>0){
-        locked=true;
-        if(items.length===1){
-          overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${assetToHTML(items[0])}`;
-        }else{
-          const lis = items.map(a=>`<li>${assetToHTML(a)}</li>`).join("");
-          overlay.innerHTML = `
-            ✅ พบข้อมูลสินทรัพย์ ${items.length} รายการ ที่มีเลขฐาน ${escapeHTML(base)}
-            <div class="hr"></div>
-            <ul class="asset-list">${lis}</ul>
-          `;
-        }
-        try{navigator.vibrate?.(120);}catch{}
-        try{ding.currentTime=0; ding.play().catch(()=>{});}catch{}
-        btnUnlock.disabled=false;
-      }else{
-        overlay.innerHTML = `⚠️ พบเลขฐาน ${escapeHTML(base)}<br>แต่ไม่พบในฐานข้อมูล`;
-      }
-    }
-  }catch(e){
-    console.error("OCR error:", e);
-  }
+const raw=result.data.text;
+
+overlay.innerHTML="OCR อ่านได้:<br>"+escapeHTML(raw);
+
+const base=normalizeBase(raw);
+
+if(base){
+
+const items=ASSETS_BASE.get(base);
+
+if(items){
+
+overlay.innerHTML="พบข้อมูลสินทรัพย์<br><br>"+assetToHTML(items[0]);
+
 }
 
-btnUnlock.addEventListener("click", ()=>{
-  locked=false; btnUnlock.disabled=true; overlay.innerHTML="รอการสแกน…";
-});
-setInterval(loopScan,200);
+}
 
-/* ==============================
-   Start
-   ============================== */
-(async function main(){
-  await loadSheet();
-  await initCamera();
-  await initOcr();
-  statusEl.innerText += " • OCR พร้อมใช้งาน";
+}
+
+setInterval(scan,1500);
+
+/* =======================
+START
+======================= */
+
+(async function(){
+
+await loadSheet();
+
+await initCamera();
+
+await initOCR();
+
+statusEl.innerText+=" • OCR พร้อมใช้งาน";
+
 })();
+
 </script>
+
 </body>
 </html>
