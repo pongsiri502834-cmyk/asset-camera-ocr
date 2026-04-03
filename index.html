@@ -7,19 +7,36 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
-  :root { --accent:#00ff88; }
-  body { margin:0; font-family:Arial, sans-serif; background:#000; color:#fff; overflow: hidden; }
-  video { width:100vw; height:100vh; object-fit:cover; display:block; }
-  #status { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(0,0,0,0.8); padding:10px; font-size:14px; text-align:center; border-bottom: 1px solid var(--accent); }
-  #overlay { position:fixed; bottom:0; left:0; right:0; z-index:10; background:rgba(0,0,0,0.92); padding:15px; max-height:70%; overflow-y:auto; border-top: 2px solid var(--accent); }
-  #toolbar { position:fixed; top:45px; right:10px; z-index:11; display:flex; gap:8px; }
-  .btn { background:rgba(0,0,0,0.6); color:#fff; border:1px solid var(--accent); border-radius:6px; padding:8px 12px; cursor:pointer; font-weight:bold; }
-  .roi { position:fixed; inset:0; pointer-events:none; z-index:5; border: 2px dashed var(--accent); margin: auto; width: 75vw; height: 22vh; top: 40%; transform: translateY(-50%); border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.3); }
-  .item-card { margin-bottom:20px; padding:15px; background:rgba(255,255,255,0.08); border-radius:10px; border-left: 5px solid var(--accent); }
-  .btn-action { display:block; text-align:center; padding:12px; margin-top:10px; border-radius:8px; font-weight:bold; cursor:pointer; text-decoration:none; width:100%; border:none; }
-  .btn-drive { background: #007bff; color: white; }
-  .btn-edit { background: #ffc107; color: #000; }
-  .loading-text { font-size: 12px; color: #ffc107; display: none; margin-top: 5px; }
+:root { --accent: #00ff88; }
+  body { margin: 0; font-family: sans-serif; background: #000; color: #fff; overflow: hidden; }
+  video { width: 100vw; height: 100vh; object-fit: cover; }
+
+  /* กรอบสแกน: ขยับขึ้นบน 35% ไม่ให้ทับข้อมูล */
+  .roi::before { 
+    content: ""; position: absolute; left: 50%; top: 35%; 
+    transform: translate(-50%, -50%); width: 75vw; height: 18vh; 
+    border: 2px dashed var(--accent); border-radius: 15px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.3) inset;
+  }
+
+  /* แถบข้อมูล: ปรับให้ใส (0.6) และบังจอแค่ 40% จากด้านล่าง */
+  #overlay { 
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; 
+    background: rgba(0, 0, 0, 0.6); padding: 15px; max-height: 40vh; 
+    overflow-y: auto; border-top: 2px solid var(--accent);
+    backdrop-filter: blur(10px); 
+  }
+
+  .item-card { 
+    margin-bottom: 8px; padding: 10px; background: rgba(255,255,255,0.1); 
+    border-radius: 8px; border-left: 4px solid var(--accent); 
+  }
+
+  .btn-grid { display: flex; gap: 8px; margin-top: 8px; }
+  .btn-action { 
+    flex: 1; padding: 10px; border-radius: 6px; font-weight: bold; 
+    border: none; cursor: pointer; color: #fff;
+  }
 </style>
 </head>
 <body>
