@@ -58,10 +58,10 @@
 
 <script>
 /* ==============================
-   CONFIG
+   CONFIG (จุดที่แก้ไข URL)
    ============================== */
-const SHEET_URL =
-  "https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url";
+// ลิงก์ CSV จาก Google Sheet (ตามรูปภาพที่คุณส่งมาล่าสุด)
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
 /** อ้างอิงด้วย “ตัวอักษรคอลัมน์” */
 const COLS = {
@@ -74,7 +74,6 @@ const COLS = {
   NUMBER: 'G'    // หมายเลขผู้ผลิต (คอลัมน์ G)
 };
 
-/** (ถ้ามี) ใส่ชื่อหัวคอลัมน์จริง เพื่อความชัวร์ยิ่งขึ้น */
 const HEADERS = {
   CODE:   "", 
   DETAIL: "", 
@@ -86,7 +85,7 @@ const HEADERS = {
 };
 
 /* ==============================
-   DOM
+   DOM & Utils
    ============================== */
 const video   = document.getElementById("video");
 const overlay = document.getElementById("overlay");
@@ -95,42 +94,25 @@ const btnUnlock = document.getElementById("btnUnlock");
 const btnToggleTorch = document.getElementById("btnToggleTorch");
 const ding = document.getElementById("ding");
 
-/* ==============================
-   Utils
-   ============================== */
 function escapeHTML(str){
-  return (str??"").toString()
-   .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-   .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+  return (str??"").toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 }
+
+// ปรับให้ดึงตัวเลข 9 หลักขึ้นไปเพื่อให้แมตช์กับรหัสใน Sheet
 function normalizeBase(str){
-  const m = ((str??"")+"").match(/\d{8,9}/);
+  const m = ((str??"")+"").match(/\d{9,15}/);
   return m ? m[0] : "";
 }
+
 function colLetterToIndex(letter){
   const s = (letter||"").toUpperCase().trim();
   let n = 0;
-  for (let i=0; i<s.length; i++){
-    n = n*26 + (s.charCodeAt(i)-64);
-  }
+  for (let i=0; i<s.length; i++){ n = n*26 + (s.charCodeAt(i)-64); }
   return n-1;
 }
-/** header helper */
-function getByHeader(rowObj, headerName){
-  if(!headerName) return undefined;
-  const keys = Object.keys(rowObj);
-  const target = headerName.replace(/\s+/g,'').toLowerCase();
-  for (const k of keys){
-    const norm = k.replace(/\s+/g,'').toLowerCase();
-    if (norm === target) return rowObj[k];
-  }
-  return undefined;
-}
-/** pick value (object with header OR array with index) */
+
 function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
   if (!Array.isArray(rowObjOrArr)) {
-    const v = getByHeader(rowObjOrArr, headerName);
-    if (v !== undefined && v !== null && v !== "") return v;
     if (headerMap && fallbackColLetter) {
       const headerKey = headerMap[fallbackColLetter];
       if (headerKey && rowObjOrArr[headerKey] !== undefined) return rowObjOrArr[headerKey];
@@ -140,28 +122,12 @@ function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
   const idx = colLetterToIndex(fallbackColLetter);
   return (rowObjOrArr[idx] ?? "");
 }
-/** เช็คว่าเป็น “ตัวเลขเงิน” ไหม */
-function looksLikeNumber(x){
-  return typeof x === "string"
-    ? !!x.trim() && /^[\d.,]+$/.test(x.trim())
-    : typeof x === "number";
-}
-/** ปรับรูปแบบเลข: ตัดคอมมา, เว้นจุดทศนิยม */
-function normalizeNumberStr(x){
-  const s = (x ?? "").toString().trim();
-  if (!s) return s;
-  const cleaned = s.replace(/,/g,'');
-  return cleaned;
-}
 
 /* ==============================
-   Data store
+   Load Google Sheet
    ============================== */
-const ASSETS_BASE = new Map(); // key: base, value: Array<asset>
+const ASSETS_BASE = new Map();
 
-/* ==============================
-   โหลดชีต
-   ============================== */
 async function loadSheet(){
   try{
     const res = await fetch(SHEET_URL,{cache:"no-store"});
@@ -169,19 +135,12 @@ async function loadSheet(){
     const text = await res.text();
 
     let parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-    let useHeader = true;
-
-    if (!parsed.data || !parsed.data.length || Object.keys(parsed.data[0]).length <= 1) {
-      parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
-      useHeader = false;
-    }
+    let useHeader = (parsed.meta.fields && parsed.meta.fields.length > 1);
 
     const headerMap = {};
     if (useHeader) {
-      const fields = parsed.meta.fields || [];
-      fields.forEach((k, i) => {
-        const letter = String.fromCharCode(65 + i);
-        headerMap[letter] = k;
+      parsed.meta.fields.forEach((k, i) => {
+        headerMap[String.fromCharCode(65 + i)] = k;
       });
     }
 
@@ -190,74 +149,36 @@ async function loadSheet(){
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-
-      const codeB = useHeader
-        ? pickValue(row, HEADERS.CODE,   COLS.CODE,   headerMap)
-        : pickValue(row, "",            COLS.CODE);
+      const codeB = pickValue(row, "", COLS.CODE, headerMap);
+      
+      // ดึงตัวเลขล้วนจากรหัสใน Sheet เพื่อใช้เป็น Key ในการค้นหา
       const base = normalizeBase(codeB);
       if (!base) continue;
-
-      const detailD = useHeader
-        ? pickValue(row, HEADERS.DETAIL, COLS.DETAIL, headerMap)
-        : pickValue(row, "",            COLS.DETAIL);
-
-      const priceI = useHeader
-        ? pickValue(row, HEADERS.PRICE,  COLS.PRICE,  headerMap)
-        : pickValue(row, "",            COLS.PRICE);
-
-      let bookN = useHeader
-        ? pickValue(row, HEADERS.BOOK,   COLS.BOOK,   headerMap)
-        : pickValue(row, "",            COLS.BOOK);
-
-      let keeperK = useHeader
-        ? pickValue(row, HEADERS.KEEPER, COLS.KEEPER, headerMap)
-        : pickValue(row, "",            COLS.KEEPER);
-
-      const statusL = useHeader
-        ? pickValue(row, HEADERS.STATUS, COLS.STATUS, headerMap)
-        : pickValue(row, "",            COLS.STATUS);
-
-      const numberG = useHeader
-        ? pickValue(row, HEADERS.NUMBER, COLS.NUMBER, headerMap)
-        : pickValue(row, "",            COLS.NUMBER);
-
-      const bookLooksNumeric   = looksLikeNumber(bookN);
-      const keeperLooksNumeric = looksLikeNumber(keeperK);
-      const bookLooksText      = /[^\d.,]/.test((bookN ?? "").toString());
-      const keeperLooksText    = /[^\d.,]/.test((keeperK ?? "").toString());
-
-      if (!bookLooksNumeric && keeperLooksNumeric && bookLooksText) {
-        const tmp = bookN; bookN = keeperK; keeperK = tmp;
-      }
-
-      const priceShow = (priceI ?? "").toString().trim();
-      const bookShow  = (bookN ?? "").toString().trim();
 
       const asset = {
         base,
         codeB:    (codeB ?? "").toString().trim(),
-        detailD:  (detailD ?? "").toString().trim(),
-        priceI:   priceShow,
-        bookN:    bookShow,
-        keeperK:  (keeperK ?? "").toString().trim(),
-        statusL:  (statusL ?? "").toString().trim(),
-        numberG:  (numberG ?? "").toString().trim()   
+        detailD:  (pickValue(row, "", COLS.DETAIL, headerMap) ?? "").toString().trim(),
+        priceI:   (pickValue(row, "", COLS.PRICE,  headerMap) ?? "").toString().trim(),
+        bookN:    (pickValue(row, "", COLS.BOOK,   headerMap) ?? "").toString().trim(),
+        keeperK:  (pickValue(row, "", COLS.KEEPER, headerMap) ?? "").toString().trim(),
+        statusL:  (pickValue(row, "", COLS.STATUS, headerMap) ?? "").toString().trim(),
+        numberG:  (pickValue(row, "", COLS.NUMBER, headerMap) ?? "").toString().trim()   
       };
 
       if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
       ASSETS_BASE.get(base).push(asset);
       count++;
     }
-
     statusEl.innerText = `โหลดข้อมูลเรียบร้อย • แถว: ${count.toLocaleString()} • เลขฐาน: ${ASSETS_BASE.size.toLocaleString()}`;
   }catch(e){
     console.error(e);
-    statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ";
+    statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ: " + e.message;
   }
 }
 
 /* ==============================
-   กล้อง & ไฟฉาย
+   Camera & OCR
    ============================== */
 let track=null, torchOn=false;
 async function initCamera(){
@@ -269,33 +190,16 @@ async function initCamera(){
     video.srcObject = stream;
     statusEl.innerText = "กล้องพร้อมใช้งาน";
     track = stream.getVideoTracks()[0];
-
-    try{
-      const caps = track.getCapabilities?.() || {};
-      if("torch" in caps) btnToggleTorch.disabled = false;
-    }catch{}
+    const caps = track.getCapabilities?.() || {};
+    if("torch" in caps) btnToggleTorch.disabled = false;
   }catch(err){
-    console.error(err);
     statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + (err.message||err);
   }
 }
-btnToggleTorch.addEventListener("click", async ()=>{
-  if(!track) return;
-  try{
-    const caps = track.getCapabilities?.() || {};
-    if(!("torch" in caps)) return;
-    torchOn = !torchOn;
-    await track.applyConstraints({advanced:[{torch:torchOn}]});
-    btnToggleTorch.textContent = torchOn ? "🔦 ปิดไฟฉาย" : "🔦 เปิดไฟฉาย";
-  }catch(e){ console.warn("Torch error:", e); }
-});
 
-/* ==============================
-   Tesseract
-   ============================== */
 let worker, workerReady=false;
 async function initOcr(){
-  worker = await Tesseract.createWorker("eng",1,{logger:()=>{}});
+  worker = await Tesseract.createWorker("eng",1);
   await worker.setParameters({
     tessedit_char_whitelist:"0123456789",
     classify_bln_numeric_mode:"1"
@@ -304,128 +208,92 @@ async function initOcr(){
 }
 
 /* ==============================
-   Scan loop
+   Scan Result & HTML
+   ============================== */
+function assetToHTML(a){
+  const baseFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=";
+  const finalUrl = baseFormUrl + encodeURIComponent(a.codeB);
+
+  return `
+    <div style="line-height: 1.6; color: #fff;">
+      <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
+      <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
+      <b>หมายเลขผู้ผลิต:</b> ${escapeHTML(a.numberG)}<br>
+      <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
+      <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
+      <b>สถานะ:</b> ${escapeHTML(a.statusL)}
+    </div>
+    <a href="${finalUrl}" target="_blank" style="display:block; background:#ffc107; color:#000; text-decoration:none; text-align:center; padding:12px; margin-top:15px; border-radius:8px; font-weight:bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+      ⚠️ ข้อมูลไม่ถูกต้อง? คลิกแจ้งแก้ไข
+    </a>
+  `;
+}
+
+/* ==============================
+   Loop Scan
    ============================== */
 let locked=false, lastRun=0;
-const SCAN_INTERVAL_MS = 1200;
 
 function getRoiCanvas(){
   const vw=video.videoWidth, vh=video.videoHeight;
   if(!vw||!vh) return null;
-
   const roiW=Math.floor(vw*0.60), roiH=Math.floor(vh*0.30);
   const roiX=Math.floor((vw-roiW)/2), roiY=Math.floor((vh-roiH)/2);
-
   const canvas=document.createElement("canvas");
   canvas.width=roiW; canvas.height=roiH;
-
   const ctx=canvas.getContext("2d");
-  ctx.imageSmoothingEnabled=false;
   ctx.drawImage(video, roiX,roiY,roiW,roiH, 0,0,roiW,roiH);
-
+  
+  // ปรับภาพเป็น ขาว-ดำ เพื่อให้อ่านลายมือได้ง่ายขึ้น
   const img=ctx.getImageData(0,0,roiW,roiH); const d=img.data;
   for(let i=0;i<d.length;i+=4){
     const gray=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
-    const v=Math.max(0,Math.min(255,(gray-128)*1.2+128));
+    const v = gray < 120 ? 0 : 255; 
     d[i]=d[i+1]=d[i+2]=v;
   }
   ctx.putImageData(img,0,0);
   return canvas;
 }
 
-function assetToHTML(a){
-  // ลิงก์ Google Forms ของคุณ พร้อมระบุ entry ID ที่คุณให้มา
-  const baseFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=";
-  
-  // นำรหัสสินทรัพย์ (a.codeB) มาต่อท้ายลิงก์
-  const finalUrl = baseFormUrl + encodeURIComponent(a.codeB);
-
-  return `
-    <div style="line-height: 1.6;">
-      <b>รหัส:</b> ${escapeHTML(a.codeB)}<br>
-      <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
-      <b>หมายเลขผู้ผลิต:</b> ${escapeHTML(a.numberG)}<br>
-      <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
-      <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
-      <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
-      <b>สถานะ:</b> ${escapeHTML(a.statusL)}
-    </div>
-    
-    <a href="${finalUrl}" target="_blank" style="
-      display: block;
-      background: #ffc107;
-      color: #000;
-      text-decoration: none;
-      text-align: center;
-      padding: 12px;
-      margin-top: 15px;
-      border-radius: 8px;
-      font-weight: bold;
-      font-size: 16px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-    ">
-      ⚠️ ข้อมูลไม่ถูกต้อง? คลิกแจ้งแก้ไข
-    </a>
-  `;
-}
-
 async function loopScan(){
-  const now=Date.now();
-  if(!workerReady||locked) return;
-  if(now-lastRun<SCAN_INTERVAL_MS) return;
-  if(video.readyState<2||video.videoWidth===0) return;
-
-  lastRun=now;
-
+  if(!workerReady||locked||Date.now()-lastRun < 1200) return;
+  if(video.readyState < 2) return;
+  lastRun=Date.now();
   const canvas=getRoiCanvas();
   if(!canvas) return;
 
   try{
     const {data} = await worker.recognize(canvas);
     const raw=(data.text||"").replace(/\s+/g," ").trim();
-
-    overlay.innerHTML = `OCR อ่านได้:<br><span class="small">${escapeHTML(raw)}</span>`;
-
     const base = normalizeBase(raw);
+
     if(base){
       const items = ASSETS_BASE.get(base);
       if(items && items.length>0){
         locked=true;
-        if(items.length===1){
-          overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${assetToHTML(items[0])}`;
-        }else{
-          const lis = items.map(a=>`<li>${assetToHTML(a)}</li>`).join("");
-          overlay.innerHTML = `
-            ✅ พบข้อมูลสินทรัพย์ ${items.length} รายการ ที่มีเลขฐาน ${escapeHTML(base)}
-            <div class="hr"></div>
-            <ul class="asset-list">${lis}</ul>
-          `;
-        }
-        try{navigator.vibrate?.(120);}catch{}
-        try{ding.currentTime=0; ding.play().catch(()=>{});}catch{}
+        overlay.innerHTML = `✅ พบข้อมูลสินทรัพย์<br><br>${assetToHTML(items[0])}`;
+        try{ding.play();}catch{}
         btnUnlock.disabled=false;
-      }else{
-        overlay.innerHTML = `⚠️ พบเลขฐาน ${escapeHTML(base)}<br>แต่ไม่พบในฐานข้อมูล`;
+      } else {
+        overlay.innerHTML = `OCR อ่านได้: ${escapeHTML(base)}<br><span style="color:red;">⚠️ ไม่พบในฐานข้อมูล</span>`;
       }
     }
-  }catch(e){
-    console.error("OCR error:", e);
-  }
+  }catch(e){ console.error(e); }
 }
 
-btnUnlock.addEventListener("click", ()=>{
-  locked=false; btnUnlock.disabled=true; overlay.innerHTML="รอการสแกน…";
+btnUnlock.addEventListener("click", ()=>{ locked=false; btnUnlock.disabled=true; overlay.innerHTML="รอการสแกน…"; });
+btnToggleTorch.addEventListener("click", async ()=>{
+  torchOn = !torchOn;
+  await track.applyConstraints({advanced:[{torch:torchOn}]});
+  btnToggleTorch.textContent = torchOn ? "🔦 ปิดไฟฉาย" : "🔦 เปิดไฟฉาย";
 });
-setInterval(loopScan,200);
 
-/* ==============================
-   Start
-   ============================== */
 (async function main(){
   await loadSheet();
   await initCamera();
   await initOcr();
-  statusEl.innerText += " • OCR พร้อมใช้งาน";
+  statusEl.innerText += " • พร้อมสแกน";
+  setInterval(loopScan, 500);
 })();
 </script>
 </body>
