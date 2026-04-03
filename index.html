@@ -3,61 +3,36 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Asset Scanner Pro - Glass UI</title>
+<title>Asset Scanner Pro - Power Scan</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-
 <style>
   :root { --accent: #00ff88; }
   body { margin: 0; font-family: sans-serif; background: #000; color: #fff; overflow: hidden; }
   video { width: 100vw; height: 100vh; object-fit: cover; display: block; }
-  
   #status { position: fixed; top: 0; left: 0; right: 0; z-index: 20; background: rgba(0,0,0,0.7); padding: 8px; font-size: 13px; text-align: center; border-bottom: 1px solid var(--accent); }
-  
-  /* แถบข้อมูลแบบโปร่งใส (Glassmorphism) */
-  #overlay { 
-    position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; 
-    background: rgba(0, 0, 0, 0.6); padding: 15px; max-height: 40vh; 
-    overflow-y: auto; border-top: 2px solid var(--accent);
-    backdrop-filter: blur(10px); border-radius: 20px 20px 0 0;
-  }
-
+  #overlay { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; background: rgba(0, 0, 0, 0.6); padding: 15px; max-height: 42vh; overflow-y: auto; border-top: 2px solid var(--accent); backdrop-filter: blur(10px); border-radius: 20px 20px 0 0; }
   #toolbar { position: fixed; top: 45px; right: 10px; z-index: 11; display: flex; gap: 8px; }
   .btn { background: rgba(0,0,0,0.5); color: #fff; border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: bold; }
-
-  /* กรอบสแกนขยับขึ้นด้านบน 35% */
-  .roi::before { 
-    content: ""; position: absolute; left: 50%; top: 35%; 
-    transform: translate(-50%, -50%); width: 75vw; height: 18vh; 
-    border: 2px dashed var(--accent); border-radius: 15px;
-    box-shadow: 0 0 0 9999px rgba(0,0,0,0.2) inset;
-  }
-  
+  .roi::before { content: ""; position: absolute; left: 50%; top: 35%; transform: translate(-50%, -50%); width: 80vw; height: 20vh; border: 2px dashed var(--accent); border-radius: 15px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.2) inset; }
   .item-card { margin-bottom: 10px; padding: 12px; background: rgba(255,255,255,0.1); border-radius: 10px; border-left: 4px solid var(--accent); }
   .btn-grid { display: flex; gap: 8px; margin-top: 8px; }
   .btn-action { flex: 1; padding: 10px; border-radius: 6px; font-weight: bold; border: none; cursor: pointer; color: #fff; text-decoration: none; text-align: center; }
 </style>
 </head>
-
 <body>
-  <div id="status">กำลังโหลด...</div>
-  <div id="toolbar">
-    <button id="btnToggleTorch" class="btn">🔦 ไฟฉาย</button>
-    <button id="btnUnlock" class="btn" style="display:none">🔁 สแกนใหม่</button>
-  </div>
+  <div id="status">⏳ กำลังเตรียมระบบ...</div>
+  <div id="toolbar"><button id="btnToggleTorch" class="btn">🔦 ไฟฉาย</button><button id="btnUnlock" class="btn" style="display:none">🔁 สแกนใหม่</button></div>
   <div class="roi"></div>
   <video id="video" autoplay playsinline></video>
   <div id="overlay">รอสแกนรหัสสินทรัพย์...</div>
   <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// --- ลิงก์ที่ต้องอัปเดตให้เป็นปัจจุบัน ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
-
-// Index คอลัมน์ที่สลับแล้ว (KEEPER=13, BOOK=10)
 const COL = { CODE:1, NUMBER:6, DETAIL:3, PRICE:8, KEEPER:13, STATUS:11, BOOK:10 };
-let ASSETS_DATA = [], locked = false, track = null;
+let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
 async function loadData() {
   try {
@@ -71,8 +46,8 @@ async function loadData() {
       keeper: (row[COL.KEEPER]||"").trim(),
       book: (row[COL.BOOK]||"").trim()
     }));
-    document.getElementById("status").innerText = `✅ พร้อมใช้งาน (${ASSETS_DATA.length} รายการ)`;
-  } catch (e) { document.getElementById("status").innerText = "❌ โหลดฐานข้อมูลไม่สำเร็จ"; }
+    document.getElementById("status").innerText = `✅ พร้อมสแกน (${ASSETS_DATA.length} รายการ)`;
+  } catch (e) { document.getElementById("status").innerText = "❌ โหลดข้อมูลผิดพลาด"; }
 }
 
 async function uploadToDrive(assetCode, btn, id) {
@@ -82,71 +57,62 @@ async function uploadToDrive(assetCode, btn, id) {
   canvas.getContext("2d").drawImage(video, 0, 0);
   const base64Image = canvas.toDataURL("image/jpeg");
   const msg = document.getElementById(`msg-${id}`);
-  const folderGroup = assetCode.split('-')[0];
-
-  btn.disabled = true; btn.innerText = "⏳ รอ...";
-  msg.style.display = "block";
-
+  btn.disabled = true; btn.innerText = "⏳ รอ..."; msg.style.display = "block";
   try {
-    await fetch(APPS_SCRIPT_URL, {
-      method: "POST", mode: "no-cors",
-      body: JSON.stringify({ image: base64Image, folderName: folderGroup, fileName: assetCode + "_" + Date.now() + ".jpg" })
-    });
+    await fetch(APPS_SCRIPT_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ image: base64Image, folderName: assetCode.split('-')[0], fileName: assetCode + "_" + Date.now() + ".jpg" })});
     btn.innerText = "✅ สำเร็จ"; btn.style.background = "#28a745";
-    msg.innerText = "บันทึกในกลุ่ม " + folderGroup;
+    msg.innerText = "บันทึกเข้า Drive เรียบร้อย";
   } catch (e) { btn.disabled = false; btn.innerText = "📸 ลองใหม่"; }
 }
 
 function assetToHTML(a) {
   const uId = a.code.replace(/\W/g, ''); 
-  return `
-    <div class="item-card">
-      <b style="color:var(--accent)">รหัส: ${a.code}</b><br>
-      <small>${a.detail}</small><br>
-      <small style="color:#aaa">ผู้ครอง: ${a.keeper} | บัญชี: ${a.book}</small>
-      <div id="msg-${uId}" style="font-size:11px; color:#ffc107; margin-top:4px; display:none;">⏳ กำลังบันทึก...</div>
-      <div class="btn-grid">
-        <button class="btn-action" style="background:#007bff;" onclick="uploadToDrive('${a.code}', this, '${uId}')">📸 ถ่ายรูป</button>
-        <a href="https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}" 
-           target="_blank" class="btn-action" style="background:#ffc107; color:#000;">⚠️ แก้ไข</a>
-      </div>
-    </div>`;
+  return `<div class="item-card">
+    <b style="color:var(--accent)">รหัส: ${a.code}</b><br><small>${a.detail}</small><br>
+    <small style="color:#aaa">ผู้ครอง: ${a.keeper} | บัญชี: ${a.book}</small>
+    <div id="msg-${uId}" style="font-size:11px; color:#ffc107; margin-top:4px; display:none;">⏳ กำลังบันทึก...</div>
+    <div class="btn-grid">
+      <button class="btn-action" style="background:#007bff;" onclick="uploadToDrive('${a.code}', this, '${uId}')">📸 ถ่ายรูป</button>
+      <a href="https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}" target="_blank" class="btn-action" style="background:#ffc107; color:#000;">⚠️ แก้ไข</a>
+    </div></div>`;
 }
 
 async function init() {
   await loadData();
   const videoEl = document.getElementById("video");
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 } } });
     videoEl.srcObject = stream; track = stream.getVideoTracks()[0];
-  } catch (e) { document.getElementById("status").innerText = "❌ กล้องขัดข้อง"; }
+  } catch (e) { document.getElementById("status").innerText = "❌ เปิดกล้องไม่ได้"; }
 
-  const worker = await Tesseract.createWorker("eng", 1);
+  worker = await Tesseract.createWorker("eng", 1);
   await worker.setParameters({ tessedit_char_whitelist: "0123456789-" });
+
+  const scanCanvas = document.createElement("canvas");
+  const scanCtx = scanCanvas.getContext("2d");
 
   setInterval(async () => {
     if (locked || videoEl.readyState < 2 || ASSETS_DATA.length === 0) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = 400; canvas.height = 150;
-    // เล็งเฉพาะส่วนกลางของจอ
-    canvas.getContext("2d").drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.25, videoEl.videoWidth*0.75, videoEl.videoHeight*0.2, 0, 0, 400, 150);
-    const { data: { text } } = await worker.recognize(canvas);
-    const clean = text.trim();
+    // ปรับพื้นที่จับภาพให้กว้างและชัดขึ้น
+    scanCanvas.width = 640; scanCanvas.height = 320;
+    scanCtx.drawImage(videoEl, videoEl.videoWidth*0.1, videoEl.videoHeight*0.25, videoEl.videoWidth*0.8, videoEl.videoHeight*0.3, 0, 0, 640, 320);
+    
+    const { data: { text } } = await worker.recognize(scanCanvas);
+    const clean = text.replace(/\s+/g, '').trim();
     if (clean.length < 5) return;
 
-    const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
+    const found = ASSETS_DATA.filter(a => a.code.replace(/-/g,'').includes(clean.replace(/-/g,'')) || clean.includes(a.base));
     if (found.length > 0) {
       locked = true;
       document.getElementById("overlay").innerHTML = `<div style="margin-bottom:8px">✅ พบ ${found.length} รายการ</div>` + found.map(item => assetToHTML(item)).join("");
       document.getElementById("btnUnlock").style.display = "block";
       document.getElementById("ding").play().catch(()=>{});
     }
-  }, 1500);
+  }, 1000);
 }
 
 document.getElementById("btnUnlock").onclick = () => { locked = false; document.getElementById("btnUnlock").style.display = "none"; document.getElementById("overlay").innerHTML = "รอสแกน..."; };
 document.getElementById("btnToggleTorch").onclick = async () => { if(track) await track.applyConstraints({ advanced: [{ torch: !track.getSettings().torch }] }); };
-
 init();
 </script>
 </body>
