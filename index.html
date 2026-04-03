@@ -2,66 +2,61 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PEA Asset Scanner - Ultimate Speed</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>PEA Asset Scanner - Turbo Speed</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
   :root { --accent:#00ff88; }
-  body { margin:0; font-family:Arial, sans-serif; background:#000; color:#fff; overflow: hidden; }
+  body { margin:0; font-family:Arial, sans-serif; background:#000; color:#fff; overflow: hidden; touch-action: manipulation; }
   video { width:100vw; height:100vh; object-fit:cover; display:block; }
-  #status { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(0,0,0,0.8); padding:10px; font-size:14px; text-align:center; border-bottom: 1px solid var(--accent); }
+  #status { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(0,0,0,0.85); padding:12px; font-size:14px; text-align:center; border-bottom: 1px solid var(--accent); }
   
-  /* แถบข้อมูลใสและเลื่อนขึ้นลงได้ */
   #overlay { 
     position:fixed; bottom:0; left:0; right:0; z-index:10; 
     background:rgba(0,0,0,0.7); padding:15px; 
-    max-height:45vh; 
-    overflow-y:auto; 
+    max-height:45vh; overflow-y:auto; 
     border-top: 2px solid var(--accent);
-    backdrop-filter: blur(10px); 
-    border-radius: 20px 20px 0 0;
+    backdrop-filter: blur(12px); border-radius: 20px 20px 0 0;
   }
 
-  #toolbar { position:fixed; top:45px; right:10px; z-index:11; display:flex; gap:8px; }
-  .btn { background:rgba(0,0,0,0.6); color:#fff; border:1px solid var(--accent); border-radius:6px; padding:8px 12px; cursor:pointer; font-weight:bold; }
+  #toolbar { position:fixed; top:55px; right:10px; z-index:11; display:flex; gap:8px; }
+  .btn { background:rgba(0,0,0,0.6); color:#fff; border:1px solid var(--accent); border-radius:8px; padding:10px 15px; cursor:pointer; font-weight:bold; }
   
   .roi { 
     position:fixed; inset:0; pointer-events:none; z-index:5; 
     border: 2px dashed var(--accent); margin: auto; 
-    width: 75vw; height: 18vh; top: 35%; transform: translateY(-50%); 
-    border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.25); 
+    width: 70vw; height: 15vh; top: 35%; transform: translateY(-50%); 
+    border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.3); 
   }
 
-  .item-card { margin-bottom:15px; padding:15px; background:rgba(255,255,255,0.1); border-radius:10px; border-left: 5px solid var(--accent); font-size: 13px; }
+  .item-card { margin-bottom:15px; padding:15px; background:rgba(255,255,255,0.1); border-radius:10px; border-left: 5px solid var(--accent); }
   .btn-grid { display: flex; gap: 8px; margin-top: 10px; }
-  .btn-action { flex: 1; text-align:center; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; text-decoration:none; border:none; color: #fff; font-size: 13px; }
+  .btn-action { flex: 1; text-align:center; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; border:none; color: #fff; font-size: 13px; }
   .btn-drive { background: #007bff; }
-  .btn-edit { background: #ffc107; color: #000; }
+  .btn-edit { background: #ffc107; color: #000; text-decoration:none; }
   .loading-text { font-size: 11px; color: #ffc107; display: none; margin-top: 5px; font-weight: bold; }
 </style>
 </head>
 <body>
 
-<div id="status">⏳ ระบบกำลังเริ่มทำงาน...</div>
+<div id="status">🚀 กำลังเร่งความเร็วระบบ OCR...</div>
 <div id="toolbar">
     <button id="btnToggleTorch" class="btn">🔦 ไฟฉาย</button>
     <button id="btnUnlock" class="btn" style="display:none">🔁 สแกนใหม่</button>
 </div>
 
-<video id="video" autoplay playsinline></video>
+<video id="video" autoplay playsinline muted></video>
 <div class="roi"></div>
 <div id="overlay">รอสแกนรหัสสินทรัพย์...</div>
 
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// --- การตั้งค่าลิงก์ ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-// Index คอลัมน์ที่แม่นยำ: B=1, D=3, I=8, N=10, K=13, L=11, G=6
-const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
+const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:13, KEEPER:10, STATUS:11, NUMBER:6 };
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
 async function loadData() {
@@ -85,22 +80,17 @@ async function loadData() {
 
 async function handleFileUpload(input, assetCode, uId) {
   if (!input.files || !input.files[0]) return;
-  const card = input.closest('.item-card');
-  const btn = card.querySelector(".btn-drive");
+  const btn = input.closest('.item-card').querySelector(".btn-drive");
   const loading = document.getElementById(`load-${uId}`);
   const file = input.files[0];
-  const folderGroup = assetCode.split('-')[0];
-
-  btn.disabled = true; btn.innerText = "⏳ กำลังส่ง...";
-  loading.style.display = "block";
-
+  btn.disabled = true; btn.innerText = "⏳ กำลังส่ง..."; loading.style.display = "block";
+  
   const reader = new FileReader();
   reader.onload = async (e) => {
-    const base64Image = e.target.result;
     try {
-      await fetch(APPS_SCRIPT_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ image: base64Image, folderName: folderGroup, fileName: assetCode + "_" + Date.now() + ".jpg" })});
+      await fetch(APPS_SCRIPT_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ image: e.target.result, folderName: assetCode.split('-')[0], fileName: assetCode + "_" + Date.now() + ".jpg" })});
       btn.innerText = "✅ สำเร็จ"; btn.style.background = "#28a745";
-      loading.innerText = "บันทึกในกลุ่ม " + folderGroup + " แล้ว";
+      loading.innerText = "บันทึกเรียบร้อย";
     } catch (err) { btn.disabled = false; btn.innerText = "📸 ลองใหม่"; }
   };
   reader.readAsDataURL(file);
@@ -109,36 +99,45 @@ async function handleFileUpload(input, assetCode, uId) {
 function assetToHTML(a, index) {
   const uId = "item-" + index;
   const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
-  return `<div class="item-card"><b style="color:var(--accent)">รหัส: ${a.code}</b><br><b>รายละเอียด:</b> ${a.detail}<br><b>หมายเลขผู้ผลิต:</b> ${a.number}<br><b>ผู้ครอง:</b> ${a.keeper}<br><b>สถานะ:</b> ${a.status}<br><b>มูลค่า:</b> ${a.price} | <b>บัญชี:</b> ${a.book}<input type="file" id="file-${uId}" accept="image/*" capture="environment" style="display:none" onchange="handleFileUpload(this, '${a.code}', '${uId}')"><div id="load-${uId}" class="loading-text">กำลังบันทึก...</div><div class="btn-grid"><button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป (กล้องแยก)</button><a href="${formUrl}" target="_blank" class="btn-action btn-edit">⚠️ แก้ไข</a></div></div>`;
+  return `<div class="item-card"><b style="color:var(--accent)">รหัส: ${a.code}</b><br><b>รายละเอียด:</b> ${a.detail}<br><b>ผู้ครอง:</b> ${a.keeper}<br><b>สถานะ:</b> ${a.status}<br><b>มูลค่า:</b> ${a.price} | <b>บัญชี:</b> ${a.book}<input type="file" id="file-${uId}" accept="image/*" capture="environment" style="display:none" onchange="handleFileUpload(this, '${a.code}', '${uId}')"><div id="load-${uId}" class="loading-text">กำลังบันทึก...</div><div class="btn-grid"><button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป</button><a href="${formUrl}" target="_blank" class="btn-action btn-edit">⚠️ แก้ไข</a></div></div>`;
 }
 
 async function init() {
   await loadData();
   const videoEl = document.getElementById("video");
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 } } });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
     videoEl.srcObject = stream; track = stream.getVideoTracks()[0];
-  } catch (err) { document.getElementById("status").innerText = "❌ ไม่พบกล้อง"; }
+  } catch (err) { document.getElementById("status").innerText = "❌ กล้องขัดข้อง"; }
 
-  worker = await Tesseract.createWorker("eng", 1);
-  await worker.setParameters({ tessedit_char_whitelist: "0123456789-" });
+  // ใช้ Worker ตัวเดียว และตั้งค่าให้ทำงานเร็วที่สุด
+  worker = await Tesseract.createWorker("eng", 1, { logger: m => {} });
+  await worker.setParameters({ 
+    tessedit_char_whitelist: "0123456789-",
+    tessjs_create_hocr: "0",
+    tessjs_create_tsv: "0" 
+  });
 
   const scanCanvas = document.createElement("canvas");
-  const scanCtx = scanCanvas.getContext("2d");
+  const scanCtx = scanCanvas.getContext("2d", { alpha: false });
 
   const doScan = async () => {
     if (locked || videoEl.readyState < 2 || ASSETS_DATA.length === 0) {
-        setTimeout(doScan, 400); return;
+        requestAnimationFrame(() => setTimeout(doScan, 300)); return;
     }
 
-    scanCanvas.width = 400; scanCanvas.height = 120;
-    scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
+    // ลดความละเอียด Canvas ลงอีกเพื่อให้ AI อ่านไวขึ้น (ขนาดเล็กแต่ชัดพอสำหรับตัวเลข)
+    scanCanvas.width = 300; scanCanvas.height = 80;
     
-    const imgData = scanCtx.getImageData(0, 0, 400, 120);
+    // เจาะจงพื้นที่สแกน (ROI)
+    scanCtx.drawImage(videoEl, videoEl.videoWidth*0.15, videoEl.videoHeight*0.35, videoEl.videoWidth*0.7, videoEl.videoHeight*0.15, 0, 0, 300, 80);
+    
+    // ประมวลผลภาพแบบรวดเร็ว
+    const imgData = scanCtx.getImageData(0, 0, 300, 80);
     const d = imgData.data;
     for (let i = 0; i < d.length; i += 4) {
-      const g = (d[i] + d[i+1] + d[i+2]) / 3;
-      const v = g < 125 ? 0 : 255;
+      const g = (d[i] * 0.3 + d[i+1] * 0.59 + d[i+2] * 0.11);
+      const v = g < 120 ? 0 : 255;
       d[i] = d[i+1] = d[i+2] = v;
     }
     scanCtx.putImageData(imgData, 0, 0);
@@ -150,19 +149,24 @@ async function init() {
         const found = ASSETS_DATA.filter(a => a.code.replace(/-/g,'').includes(clean) || clean.includes(a.base.replace(/-/g,'')));
         if (found.length > 0) {
             locked = true;
-            document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ (เลื่อนดูได้)</div>` + found.map((item, idx) => assetToHTML(item, idx)).join("");
+            document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ</div>` + found.map((item, idx) => assetToHTML(item, idx)).join("");
             document.getElementById("btnUnlock").style.display = "block";
             document.getElementById("ding").play().catch(()=>{});
-            setTimeout(doScan, 1000); return;
+            return;
         }
     }
-    setTimeout(doScan, 50);
+    // สแกนรอบใหม่ทันที
+    requestAnimationFrame(doScan);
   };
   doScan();
 }
 
-document.getElementById("btnUnlock").onclick = () => { locked = false; document.getElementById("btnUnlock").style.display = "none"; document.getElementById("overlay").innerHTML = "รอสแกนรหัสสินทรัพย์..."; };
+document.getElementById("btnUnlock").onclick = () => { locked = false; document.getElementById("btnUnlock").style.display = "none"; document.getElementById("overlay").innerHTML = "รอสแกน..."; initScanLoop(); };
 document.getElementById("btnToggleTorch").onclick = async () => { if (track) await track.applyConstraints({ advanced: [{ torch: !track.getSettings().torch }] }); };
+
+// ฟังก์ชันสำหรับรัน Loop สแกนใหม่หลังจากปลดล็อค
+function initScanLoop() { locked = false; }
+
 init();
 </script>
 </body>
