@@ -58,30 +58,23 @@
 
 <script>
 /* ==============================
-   CONFIG (จุดที่แก้ไข URL)
+   CONFIG
    ============================== */
-// ลิงก์ CSV จาก Google Sheet (ตามรูปภาพที่คุณส่งมาล่าสุด)
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-/** อ้างอิงด้วย “ตัวอักษรคอลัมน์” */
+/** อ้างอิงด้วย “ตัวอักษรคอลัมน์” ให้ตรงตาม Sheet จริง */
 const COLS = {
   CODE:   'B',   // รหัส
   DETAIL: 'D',   // รายละเอียด
   PRICE:  'I',   // มูลค่า
-  BOOK:   'N',   // มูลค่าตามบัญชี
-  KEEPER: 'K',   // ชื่อผู้ครอบครอง
+  BOOK:   'N',   // มูลค่าตามบัญชี (คอลัมน์ N)
+  KEEPER: 'K',   // ชื่อผู้ครอบครอง (คอลัมน์ K)
   STATUS: 'L',   // สถานะ
-  NUMBER: 'G'    // หมายเลขผู้ผลิต (คอลัมน์ G)
+  NUMBER: 'G'    // หมายเลขผู้ผลิต
 };
 
 const HEADERS = {
-  CODE:   "", 
-  DETAIL: "", 
-  PRICE:  "", 
-  BOOK:   "", 
-  KEEPER: "", 
-  STATUS: "",
-  NUMBER: ""  
+  CODE: "", DETAIL: "", PRICE: "", BOOK: "", KEEPER: "", STATUS: "", NUMBER: ""  
 };
 
 /* ==============================
@@ -98,7 +91,6 @@ function escapeHTML(str){
   return (str??"").toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 }
 
-// ปรับให้ดึงตัวเลข 9 หลักขึ้นไปเพื่อให้แมตช์กับรหัสใน Sheet
 function normalizeBase(str){
   const m = ((str??"")+"").match(/\d{9,15}/);
   return m ? m[0] : "";
@@ -111,7 +103,7 @@ function colLetterToIndex(letter){
   return n-1;
 }
 
-function pickValue(rowObjOrArr, headerName, fallbackColLetter, headerMap){
+function pickValue(rowObjOrArr, fallbackColLetter, headerMap){
   if (!Array.isArray(rowObjOrArr)) {
     if (headerMap && fallbackColLetter) {
       const headerKey = headerMap[fallbackColLetter];
@@ -149,21 +141,19 @@ async function loadSheet(){
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const codeB = pickValue(row, "", COLS.CODE, headerMap);
-      
-      // ดึงตัวเลขล้วนจากรหัสใน Sheet เพื่อใช้เป็น Key ในการค้นหา
+      const codeB = pickValue(row, COLS.CODE, headerMap);
       const base = normalizeBase(codeB);
       if (!base) continue;
 
       const asset = {
         base,
         codeB:    (codeB ?? "").toString().trim(),
-        detailD:  (pickValue(row, "", COLS.DETAIL, headerMap) ?? "").toString().trim(),
-        priceI:   (pickValue(row, "", COLS.PRICE,  headerMap) ?? "").toString().trim(),
-        bookN:    (pickValue(row, "", COLS.BOOK,   headerMap) ?? "").toString().trim(),
-        keeperK:  (pickValue(row, "", COLS.KEEPER, headerMap) ?? "").toString().trim(),
-        statusL:  (pickValue(row, "", COLS.STATUS, headerMap) ?? "").toString().trim(),
-        numberG:  (pickValue(row, "", COLS.NUMBER, headerMap) ?? "").toString().trim()   
+        detailD:  (pickValue(row, COLS.DETAIL, headerMap) ?? "").toString().trim(),
+        priceI:   (pickValue(row, COLS.PRICE,  headerMap) ?? "").toString().trim(),
+        bookN:    (pickValue(row, COLS.BOOK,   headerMap) ?? "").toString().trim(), // คอลัมน์ N
+        keeperK:  (pickValue(row, COLS.KEEPER, headerMap) ?? "").toString().trim(), // คอลัมน์ K
+        statusL:  (pickValue(row, COLS.STATUS, headerMap) ?? "").toString().trim(),
+        numberG:  (pickValue(row, COLS.NUMBER, headerMap) ?? "").toString().trim()   
       };
 
       if (!ASSETS_BASE.has(base)) ASSETS_BASE.set(base, []);
@@ -172,7 +162,6 @@ async function loadSheet(){
     }
     statusEl.innerText = `โหลดข้อมูลเรียบร้อย • แถว: ${count.toLocaleString()} • เลขฐาน: ${ASSETS_BASE.size.toLocaleString()}`;
   }catch(e){
-    console.error(e);
     statusEl.innerText = "โหลด Google Sheet ไม่สำเร็จ: " + e.message;
   }
 }
@@ -220,6 +209,7 @@ function assetToHTML(a){
       <b>รายละเอียด:</b> ${escapeHTML(a.detailD)}<br>
       <b>หมายเลขผู้ผลิต:</b> ${escapeHTML(a.numberG)}<br>
       <b>มูลค่า:</b> ${escapeHTML(a.priceI)} บาท<br>
+      <b>มูลค่าตามบัญชี:</b> ${escapeHTML(a.bookN)} บาท<br>
       <b>ชื่อผู้ครอบครอง:</b> ${escapeHTML(a.keeperK)}<br>
       <b>สถานะ:</b> ${escapeHTML(a.statusL)}
     </div>
@@ -244,7 +234,6 @@ function getRoiCanvas(){
   const ctx=canvas.getContext("2d");
   ctx.drawImage(video, roiX,roiY,roiW,roiH, 0,0,roiW,roiH);
   
-  // ปรับภาพเป็น ขาว-ดำ เพื่อให้อ่านลายมือได้ง่ายขึ้น
   const img=ctx.getImageData(0,0,roiW,roiH); const d=img.data;
   for(let i=0;i<d.length;i+=4){
     const gray=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
