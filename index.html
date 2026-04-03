@@ -3,21 +3,20 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PEA Asset Scanner - Ultimate System</title>
+<title>Asset Scanner - External Camera System</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
   :root { --accent:#00ff88; }
   body { margin:0; font-family:Arial, sans-serif; background:#000; color:#fff; overflow: hidden; }
   video { width:100vw; height:100vh; object-fit:cover; display:block; }
-  
   #status { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(0,0,0,0.8); padding:10px; font-size:14px; text-align:center; border-bottom: 1px solid var(--accent); }
   
-  /* แถบข้อมูลใส (Glass UI) และเลื่อนขึ้นลงได้ */
+  /* แถบข้อมูลใสและเลื่อนขึ้นลงได้ */
   #overlay { 
     position:fixed; bottom:0; left:0; right:0; z-index:10; 
-    background:rgba(0,0,0,0.65); padding:15px; 
-    max-height:48%; 
+    background:rgba(0,0,0,0.7); padding:15px; 
+    max-height:45vh; 
     overflow-y:auto; 
     border-top: 2px solid var(--accent);
     backdrop-filter: blur(10px); 
@@ -27,7 +26,6 @@
   #toolbar { position:fixed; top:45px; right:10px; z-index:11; display:flex; gap:8px; }
   .btn { background:rgba(0,0,0,0.6); color:#fff; border:1px solid var(--accent); border-radius:6px; padding:8px 12px; cursor:pointer; font-weight:bold; }
   
-  /* กรอบ ROI ตำแหน่งที่สแกนติดง่ายที่สุดของคุณ */
   .roi { 
     position:fixed; inset:0; pointer-events:none; z-index:5; 
     border: 2px dashed var(--accent); margin: auto; 
@@ -58,7 +56,6 @@
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// --- การตั้งค่า ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
@@ -66,7 +63,6 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk
 const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:13, KEEPER:10, STATUS:11, NUMBER:6 };
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
-// 1. โหลดข้อมูล
 async function loadData() {
   try {
     const res = await fetch(SHEET_URL);
@@ -83,16 +79,16 @@ async function loadData() {
       number: (row[COL.NUMBER]||"").trim()
     }));
     document.getElementById("status").innerText = `✅ พร้อมใช้งาน (${ASSETS_DATA.length} รายการ)`;
-  } catch (err) { document.getElementById("status").innerText = "❌ โหลดข้อมูลไม่สำเร็จ"; }
+  } catch (err) { document.getElementById("status").innerText = "❌ โหลดข้อมูลล้มเหลว"; }
 }
 
-// 2. ฟังก์ชันอัปโหลด (แบบ Google Forms เปิดกล้องแยก)
+// ฟังก์ชันใหม่: รับไฟล์รูปภาพจากการเปิดกล้องแยก
 async function handleFileUpload(input, assetCode, uId) {
   if (!input.files || !input.files[0]) return;
   
   const card = input.closest('.item-card');
   const btn = card.querySelector(".btn-drive");
-  const loading = document.getElementById(`loading-${uId}`);
+  const loading = document.getElementById(`load-${uId}`);
   const file = input.files[0];
   const folderGroup = assetCode.split('-')[0];
 
@@ -110,7 +106,7 @@ async function handleFileUpload(input, assetCode, uId) {
         })
       });
       btn.innerText = "✅ สำเร็จ"; btn.style.background = "#28a745";
-      loading.innerText = "บันทึกเข้า Drive กลุ่ม " + folderGroup + " แล้ว";
+      loading.innerText = "บันทึกในกลุ่ม " + folderGroup + " เรียบร้อย";
     } catch (err) {
       btn.disabled = false; btn.innerText = "📸 ลองใหม่";
     }
@@ -118,7 +114,6 @@ async function handleFileUpload(input, assetCode, uId) {
   reader.readAsDataURL(file);
 }
 
-// 3. สร้าง HTML
 function assetToHTML(a, index) {
   const uId = "item-" + index;
   const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
@@ -134,7 +129,7 @@ function assetToHTML(a, index) {
       <input type="file" id="file-${uId}" accept="image/*" capture="environment" 
              style="display:none" onchange="handleFileUpload(this, '${a.code}', '${uId}')">
       
-      <div id="loading-${uId}" class="loading-text">กำลังบันทึก...</div>
+      <div id="load-${uId}" class="loading-text">กำลังบันทึก...</div>
       
       <div class="btn-grid">
         <button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป (กล้องแยก)</button>
@@ -143,7 +138,6 @@ function assetToHTML(a, index) {
     </div>`;
 }
 
-// 4. เริ่มระบบสแกนความเร็วสูง
 async function init() {
   await loadData();
   const videoEl = document.getElementById("video");
@@ -162,11 +156,10 @@ async function init() {
     if (locked || videoEl.readyState < 2 || ASSETS_DATA.length === 0) {
         setTimeout(doScan, 400); return;
     }
-    // ตำแหน่ง Crop เดิมที่คุณชอบ
     scanCanvas.width = 400; scanCanvas.height = 120;
     scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
     
-    // แต่งภาพขาวดำ
+    // แต่งภาพขาวดำเร่งความเร็ว
     const imgData = scanCtx.getImageData(0, 0, 400, 120);
     const d = imgData.data;
     for (let i = 0; i < d.length; i += 4) {
