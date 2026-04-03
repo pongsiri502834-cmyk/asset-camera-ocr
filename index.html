@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Asset Scanner - External Camera System</title>
+<title>PEA Asset Scanner - Ultimate Speed</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
@@ -43,7 +43,7 @@
 </head>
 <body>
 
-<div id="status">⏳ กำลังโหลดข้อมูล...</div>
+<div id="status">⏳ ระบบกำลังเริ่มทำงาน...</div>
 <div id="toolbar">
     <button id="btnToggleTorch" class="btn">🔦 ไฟฉาย</button>
     <button id="btnUnlock" class="btn" style="display:none">🔁 สแกนใหม่</button>
@@ -56,11 +56,12 @@
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
+// --- การตั้งค่าลิงก์ ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 
-// Index คอลัมน์ตามคำขอ: B=1, D=3, I=8, N=10, K=13, L=11, G=6
-const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
+// Index คอลัมน์ที่แม่นยำ: B=1, D=3, I=8, N=13, K=10, L=11, G=6
+const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:13, KEEPER:10, STATUS:11, NUMBER:6 };
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
 async function loadData() {
@@ -78,14 +79,12 @@ async function loadData() {
       status: (row[COL.STATUS]||"").trim(),
       number: (row[COL.NUMBER]||"").trim()
     }));
-    document.getElementById("status").innerText = `✅ พร้อมใช้งาน (${ASSETS_DATA.length} รายการ)`;
+    document.getElementById("status").innerText = `✅ พร้อมสแกน (${ASSETS_DATA.length} รายการ)`;
   } catch (err) { document.getElementById("status").innerText = "❌ โหลดข้อมูลล้มเหลว"; }
 }
 
-// ฟังก์ชันใหม่: รับไฟล์รูปภาพจากการเปิดกล้องแยก
 async function handleFileUpload(input, assetCode, uId) {
   if (!input.files || !input.files[0]) return;
-  
   const card = input.closest('.item-card');
   const btn = card.querySelector(".btn-drive");
   const loading = document.getElementById(`load-${uId}`);
@@ -99,17 +98,10 @@ async function handleFileUpload(input, assetCode, uId) {
   reader.onload = async (e) => {
     const base64Image = e.target.result;
     try {
-      await fetch(APPS_SCRIPT_URL, {
-        method: "POST", mode: "no-cors",
-        body: JSON.stringify({
-          image: base64Image, folderName: folderGroup, fileName: assetCode + "_" + Date.now() + ".jpg"
-        })
-      });
+      await fetch(APPS_SCRIPT_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ image: base64Image, folderName: folderGroup, fileName: assetCode + "_" + Date.now() + ".jpg" })});
       btn.innerText = "✅ สำเร็จ"; btn.style.background = "#28a745";
-      loading.innerText = "บันทึกในกลุ่ม " + folderGroup + " เรียบร้อย";
-    } catch (err) {
-      btn.disabled = false; btn.innerText = "📸 ลองใหม่";
-    }
+      loading.innerText = "บันทึกในกลุ่ม " + folderGroup + " แล้ว";
+    } catch (err) { btn.disabled = false; btn.innerText = "📸 ลองใหม่"; }
   };
   reader.readAsDataURL(file);
 }
@@ -117,25 +109,7 @@ async function handleFileUpload(input, assetCode, uId) {
 function assetToHTML(a, index) {
   const uId = "item-" + index;
   const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
-  return `
-    <div class="item-card">
-      <b style="color:var(--accent)">รหัส: ${a.code}</b><br>
-      <b>รายละเอียด:</b> ${a.detail}<br>
-      <b>หมายเลขผู้ผลิต:</b> ${a.number}<br>
-      <b>ผู้ครอบครอง:</b> ${a.keeper}<br>
-      <b>สถานะ:</b> ${a.status}<br>
-      <b>มูลค่า:</b> ${a.price} | <b>บัญชี:</b> ${a.book}
-      
-      <input type="file" id="file-${uId}" accept="image/*" capture="environment" 
-             style="display:none" onchange="handleFileUpload(this, '${a.code}', '${uId}')">
-      
-      <div id="load-${uId}" class="loading-text">กำลังบันทึก...</div>
-      
-      <div class="btn-grid">
-        <button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป (กล้องแยก)</button>
-        <a href="${formUrl}" target="_blank" class="btn-action btn-edit">⚠️ แก้ไข</a>
-      </div>
-    </div>`;
+  return `<div class="item-card"><b style="color:var(--accent)">รหัส: ${a.code}</b><br><b>รายละเอียด:</b> ${a.detail}<br><b>หมายเลขผู้ผลิต:</b> ${a.number}<br><b>ผู้ครอง:</b> ${a.keeper}<br><b>สถานะ:</b> ${a.status}<br><b>มูลค่า:</b> ${a.price} | <b>บัญชี:</b> ${a.book}<input type="file" id="file-${uId}" accept="image/*" capture="environment" style="display:none" onchange="handleFileUpload(this, '${a.code}', '${uId}')"><div id="load-${uId}" class="loading-text">กำลังบันทึก...</div><div class="btn-grid"><button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป (กล้องแยก)</button><a href="${formUrl}" target="_blank" class="btn-action btn-edit">⚠️ แก้ไข</a></div></div>`;
 }
 
 async function init() {
@@ -156,10 +130,10 @@ async function init() {
     if (locked || videoEl.readyState < 2 || ASSETS_DATA.length === 0) {
         setTimeout(doScan, 400); return;
     }
+
     scanCanvas.width = 400; scanCanvas.height = 120;
     scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
     
-    // แต่งภาพขาวดำเร่งความเร็ว
     const imgData = scanCtx.getImageData(0, 0, 400, 120);
     const d = imgData.data;
     for (let i = 0; i < d.length; i += 4) {
