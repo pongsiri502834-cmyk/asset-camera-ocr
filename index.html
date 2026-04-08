@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Asset Scanner Speed Edition</title>
+<title>Asset Scanner Full Detail</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
@@ -14,8 +14,8 @@
   
   #overlay { 
     position:fixed; bottom:0; left:0; right:0; z-index:10; 
-    background:rgba(0,0,0,0.85); padding:15px; 
-    max-height:45vh; overflow-y:auto; 
+    background:rgba(0,0,0,0.9); padding:15px; 
+    max-height:50vh; overflow-y:auto; 
     border-top: 2px solid var(--accent);
     backdrop-filter: blur(10px); 
     border-radius: 20px 20px 0 0;
@@ -31,11 +31,12 @@
     border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);
   }
 
-  .item-card { margin-bottom:12px; padding:15px; background:rgba(255,255,255,0.1); border-radius:12px; border-left: 5px solid var(--accent); }
-  .btn-grid { display: flex; gap: 8px; margin-top: 10px; }
+  .item-card { margin-bottom:12px; padding:15px; background:rgba(255,255,255,0.1); border-radius:12px; border-left: 5px solid var(--accent); font-size: 14px; line-height: 1.6; }
+  .btn-grid { display: flex; gap: 8px; margin-top: 12px; }
   .btn-action { flex: 1; text-align:center; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; text-decoration:none; border:none; color: #fff; font-size: 14px; }
   .btn-drive { background: #007bff; }
   .btn-edit { background: #555; }
+  b { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -53,14 +54,14 @@
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// --- CONFIG ---
+// --- CONFIG (ตรวจสอบคอลัมน์ให้ตรงกับ Google Sheets ของคุณ) ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
 
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
-// 1. LOAD DATA
+// 1. LOAD DATA (ดึงข้อมูลกลับมาให้ครบทุกส่วน)
 async function loadData() {
   try {
     const res = await fetch(SHEET_URL);
@@ -71,15 +72,18 @@ async function loadData() {
       base: (row[COL.CODE]||"").split('-')[0],
       detail: (row[COL.DETAIL]||"").trim(),
       number: (row[COL.NUMBER]||"").trim(),
-      keeper: (row[COL.KEEPER]||"").trim()
+      price: (row[COL.PRICE]||"").trim(),
+      book: (row[COL.BOOK]||"").trim(),
+      keeper: (row[COL.KEEPER]||"").trim(),
+      status: (row[COL.STATUS]||"").trim()
     }));
-    document.getElementById("status").innerText = `✅ พร้อมสแกน (${ASSETS_DATA.length} รายการ)`;
+    document.getElementById("status").innerText = `✅ พร้อมใช้งาน (${ASSETS_DATA.length} รายการ)`;
   } catch (err) { 
     document.getElementById("status").innerText = "❌ โหลดข้อมูลไม่สำเร็จ";
   }
 }
 
-// 2. FILE UPLOAD (GOOGLEDrive)
+// 2. FILE UPLOAD
 async function handleFileUpload(input, assetCode) {
   if (!input.files || !input.files[0]) return;
   const btn = input.closest('.item-card').querySelector(".btn-drive");
@@ -104,20 +108,23 @@ async function handleFileUpload(input, assetCode) {
   reader.readAsDataURL(input.files[0]);
 }
 
+// แสดงข้อมูลรายละเอียดทั้งหมดกลับมา
 function assetToHTML(a, index) {
   const uId = "idx-" + index;
   const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
   return `
     <div class="item-card">
-      <b style="color:var(--accent); font-size:16px;">${a.code}</b><br>
-      <div style="font-size:13px; margin-top:5px;">
-        ${a.detail}<br>
-        S/N: ${a.number} | ผู้ครอง: ${a.keeper}
-      </div>
+      <b>รหัสสินทรัพย์:</b> ${a.code}<br>
+      <b>รายละเอียด:</b> ${a.detail}<br>
+      <b>หมายเลขผู้ผลิต:</b> ${a.number}<br>
+      <b>ผู้ครอบครอง:</b> ${a.keeper}<br>
+      <b>สถานะ:</b> ${a.status}<br>
+      <b>มูลค่าทุน:</b> ${a.price} | <b>ตามบัญชี:</b> ${a.book}
+      
       <input type="file" id="file-${uId}" accept="image/*" capture="environment" style="display:none" onchange="handleFileUpload(this, '${a.code}')">
       <div class="btn-grid">
         <button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป</button>
-        <a href="${formUrl}" target="_blank" class="btn-action btn-edit">แก้ไข</a>
+        <a href="${formUrl}" target="_blank" class="btn-action btn-edit">แก้ไขข้อมูล</a>
       </div>
     </div>`;
 }
@@ -138,7 +145,6 @@ async function init() {
     return;
   }
 
-  // เตรียม AI (ใช้ whitelist เพื่อความเร็ว)
   worker = await Tesseract.createWorker("eng", 1);
   await worker.setParameters({ tessedit_char_whitelist: "0123456789-" });
 
@@ -151,11 +157,9 @@ async function init() {
         return;
     }
 
-    // กำหนดพื้นที่สแกน (ROI)
     scanCanvas.width = 400; scanCanvas.height = 120;
     scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
 
-    // สแกนภาพสด (ไม่แต่งภาพ เพื่อให้ไวแบบไฟล์ 4)
     const { data: { text } } = await worker.recognize(scanCanvas);
     const clean = text.replace(/[^0-9-]/g, '').trim();
     
@@ -169,7 +173,7 @@ async function init() {
             return;
         }
     }
-    setTimeout(doScan, 400); // สแกนรอบถัดไป (0.4 วินาที)
+    setTimeout(doScan, 400); 
   };
   
   doScan();
