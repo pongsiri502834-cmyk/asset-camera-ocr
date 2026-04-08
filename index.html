@@ -57,7 +57,7 @@
 // --- CONFIG (ตรวจสอบคอลัมน์ให้ตรงกับ Google Sheets ของคุณ) ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
-const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:13, KEEPER:10, STATUS:11, NUMBER:6 };
+const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
 
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
