@@ -2,50 +2,48 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Asset Scanner Speed Optimized</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Asset Scanner Speed Edition</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
   :root { --accent:#00ff88; }
   body { margin:0; font-family:Arial, sans-serif; background:#000; color:#fff; overflow: hidden; }
   video { width:100vw; height:100vh; object-fit:cover; display:block; }
-  
   #status { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(0,0,0,0.8); padding:10px; font-size:14px; text-align:center; border-bottom: 1px solid var(--accent); }
   
   #overlay { 
     position:fixed; bottom:0; left:0; right:0; z-index:10; 
     background:rgba(0,0,0,0.85); padding:15px; 
-    max-height:50vh; overflow-y:auto; 
+    max-height:45vh; overflow-y:auto; 
     border-top: 2px solid var(--accent);
     backdrop-filter: blur(10px); 
     border-radius: 20px 20px 0 0;
   }
 
-  #toolbar { position:fixed; top:45px; right:10px; z-index:11; display:flex; gap:8px; }
-  .btn { background:rgba(0,0,0,0.6); color:#fff; border:1px solid var(--accent); border-radius:6px; padding:8px 12px; cursor:pointer; font-weight:bold; }
+  #toolbar { position:fixed; top:50px; right:10px; z-index:11; display:flex; flex-direction:column; gap:10px; }
+  .btn-circle { width:50px; height:50px; border-radius:50%; border:1px solid var(--accent); background:rgba(0,0,0,0.6); color:#fff; font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
   
   .roi { 
     position:fixed; inset:0; pointer-events:none; z-index:5; 
-    border: 2px dashed var(--accent); margin: auto;
-    width: 75vw; height: 18vh; top: 35%; transform: translateY(-50%); 
-    border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.3);
+    border: 2px solid var(--accent); margin: auto;
+    width: 75vw; height: 18vh; top: 40%; transform: translateY(-50%); 
+    border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);
   }
 
-  .item-card { margin-bottom:15px; padding:15px; background:rgba(255,255,255,0.1); border-radius:10px; border-left: 5px solid var(--accent); font-size: 14px; }
+  .item-card { margin-bottom:12px; padding:15px; background:rgba(255,255,255,0.1); border-radius:12px; border-left: 5px solid var(--accent); }
   .btn-grid { display: flex; gap: 8px; margin-top: 10px; }
-  .btn-action { flex: 1; text-align:center; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; text-decoration:none; border:none; color: #fff; font-size: 13px; }
+  .btn-action { flex: 1; text-align:center; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; text-decoration:none; border:none; color: #fff; font-size: 14px; }
   .btn-drive { background: #007bff; }
-  .btn-edit { background: #ffc107; color: #000; }
-  .loading-text { font-size: 11px; color: #ffc107; display: none; margin-top: 5px; font-weight: bold; }
+  .btn-edit { background: #555; }
 </style>
 </head>
 <body>
 
-<div id="status">⏳ กำลังโหลดข้อมูล...</div>
+<div id="status">⏳ กำลังเตรียมระบบ...</div>
 <div id="toolbar">
-    <button id="btnToggleTorch" class="btn">🔦 ไฟฉาย</button>
-    <button id="btnUnlock" class="btn" style="display:none">🔁 สแกนใหม่</button>
+    <button id="btnToggleTorch" class="btn-circle">🔦</button>
+    <button id="btnUnlock" class="btn-circle" style="display:none; border-color:#ff4444;">🔁</button>
 </div>
 
 <video id="video" autoplay playsinline></video>
@@ -55,152 +53,140 @@
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// CONFIG
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec"; [cite: 48]
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv"; [cite: 48]
-const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 }; [cite: 48]
+// --- CONFIG ---
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
+const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
 
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
+// 1. LOAD DATA
 async function loadData() {
   try {
-    const res = await fetch(SHEET_URL); [cite: 50]
-    const text = await res.text(); [cite: 50]
-    const parsed = Papa.parse(text, { header: false, skipEmptyLines: true }); [cite: 51]
+    const res = await fetch(SHEET_URL);
+    const text = await res.text();
+    const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
     ASSETS_DATA = parsed.data.slice(1).map(row => ({
       code: (row[COL.CODE]||"").trim(),
       base: (row[COL.CODE]||"").split('-')[0],
       detail: (row[COL.DETAIL]||"").trim(),
-      price: (row[COL.PRICE]||"").trim(),
-      book: (row[COL.BOOK]||"").trim(),
-      keeper: (row[COL.KEEPER]||"").trim(),
-      status: (row[COL.STATUS]||"").trim(),
-      number: (row[COL.NUMBER]||"").trim()
-    })); [cite: 52]
-    document.getElementById("status").innerText = `✅ พร้อมใช้งาน (${ASSETS_DATA.length} รายการ)`; [cite: 53]
+      number: (row[COL.NUMBER]||"").trim(),
+      keeper: (row[COL.KEEPER]||"").trim()
+    }));
+    document.getElementById("status").innerText = `✅ พร้อมสแกน (${ASSETS_DATA.length} รายการ)`;
   } catch (err) { 
-    document.getElementById("status").innerText = "❌ โหลดข้อมูลล้มเหลว"; [cite: 53]
+    document.getElementById("status").innerText = "❌ โหลดข้อมูลไม่สำเร็จ";
   }
 }
 
-async function handleFileUpload(input, assetCode, uId) {
+// 2. FILE UPLOAD (GOOGLEDrive)
+async function handleFileUpload(input, assetCode) {
   if (!input.files || !input.files[0]) return;
-  const card = input.closest('.item-card'); [cite: 54]
-  const btn = card.querySelector(".btn-drive"); [cite: 55]
-  const loading = document.getElementById(`load-${uId}`); [cite: 55]
-  const file = input.files[0];
-  const folderGroup = assetCode.split('-')[0]; [cite: 55]
+  const btn = input.closest('.item-card').querySelector(".btn-drive");
+  btn.disabled = true; btn.innerText = "⏳ กำลังส่ง...";
 
-  btn.disabled = true; [cite: 55]
-  btn.innerText = "⏳ กำลังส่ง..."; [cite: 56]
-  loading.style.display = "block"; [cite: 56]
-
-  const reader = new FileReader(); [cite: 56]
+  const reader = new FileReader();
   reader.onload = async (e) => {
-    const base64Image = e.target.result; [cite: 57]
     try {
       await fetch(APPS_SCRIPT_URL, {
         method: "POST", mode: "no-cors",
         body: JSON.stringify({
-          image: base64Image, folderName: folderGroup, fileName: assetCode + "_" + Date.now() + ".jpg"
+          image: e.target.result, 
+          folderName: assetCode.split('-')[0], 
+          fileName: assetCode + "_" + Date.now() + ".jpg"
         })
-      }); [cite: 58]
-      btn.innerText = "✅ สำเร็จ"; btn.style.background = "#28a745"; [cite: 59]
-      loading.innerText = "บันทึกเรียบร้อย"; [cite: 59]
+      });
+      btn.innerText = "✅ สำเร็จ"; btn.style.background = "#28a745";
     } catch (err) {
-      btn.disabled = false; btn.innerText = "📸 ลองใหม่"; [cite: 60]
+      btn.disabled = false; btn.innerText = "📸 ลองใหม่";
     }
   };
-  reader.readAsDataURL(file); [cite: 60]
+  reader.readAsDataURL(input.files[0]);
 }
 
 function assetToHTML(a, index) {
-  const uId = "item-" + index;
-  const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`; [cite: 61]
+  const uId = "idx-" + index;
+  const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
   return `
     <div class="item-card">
-      <b style="color:var(--accent)">รหัส: ${a.code}</b><br>
-      <b>รายละเอียด:</b> ${a.detail}<br>
-      <b>หมายเลขผู้ผลิต:</b> ${a.number}<br>
-      <b>ผู้ครอบครอง:</b> ${a.keeper}<br>
-      <b>สถานะ:</b> ${a.status}<br>
-      <b>มูลค่า:</b> ${a.price} | <b>บัญชี:</b> ${a.book} [cite: 62, 63]
-      
-      <input type="file" id="file-${uId}" accept="image/*" capture="environment" 
-             style="display:none" onchange="handleFileUpload(this, '${a.code}', '${uId}')"> [cite: 63]
-      
-      <div id="load-${uId}" class="loading-text">กำลังบันทึก...</div>
-      
+      <b style="color:var(--accent); font-size:16px;">${a.code}</b><br>
+      <div style="font-size:13px; margin-top:5px;">
+        ${a.detail}<br>
+        S/N: ${a.number} | ผู้ครอง: ${a.keeper}
+      </div>
+      <input type="file" id="file-${uId}" accept="image/*" capture="environment" style="display:none" onchange="handleFileUpload(this, '${a.code}')">
       <div class="btn-grid">
-        <button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป</button> [cite: 63]
-        <a href="${formUrl}" target="_blank" class="btn-action btn-edit">⚠️ แก้ไข</a> [cite: 63]
+        <button class="btn-action btn-drive" onclick="document.getElementById('file-${uId}').click()">📸 ถ่ายรูป</button>
+        <a href="${formUrl}" target="_blank" class="btn-action btn-edit">แก้ไข</a>
       </div>
     </div>`;
 }
 
+// 3. MAIN SCANNER ENGINE
 async function init() {
   await loadData();
   const videoEl = document.getElementById("video");
+  
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: "environment", width: { ideal: 1280 } } 
-    }); [cite: 65]
+      video: { facingMode: "environment", width: { ideal: 1280 } } 
+    });
     videoEl.srcObject = stream; 
-    track = stream.getVideoTracks()[0]; [cite: 66]
-  } catch (err) { 
-    document.getElementById("status").innerText = "❌ ไม่พบกล้อง"; [cite: 66]
+    track = stream.getVideoTracks()[0];
+  } catch (err) {
+    document.getElementById("status").innerText = "❌ กล้องไม่ทำงาน";
+    return;
   }
 
-  worker = await Tesseract.createWorker("eng", 1); [cite: 67]
-  await worker.setParameters({ tessedit_char_whitelist: "0123456789-" }); [cite: 67]
+  // เตรียม AI (ใช้ whitelist เพื่อความเร็ว)
+  worker = await Tesseract.createWorker("eng", 1);
+  await worker.setParameters({ tessedit_char_whitelist: "0123456789-" });
 
   const scanCanvas = document.createElement("canvas");
   const scanCtx = scanCanvas.getContext("2d");
 
   const doScan = async () => {
-    // ปรับความเร็วเป็น 600ms เพื่อความลื่นไหล
-    if (locked || videoEl.readyState < 2 || ASSETS_DATA.length === 0) {
-        setTimeout(doScan, 600);
+    if (locked || videoEl.readyState < 2) {
+        setTimeout(doScan, 400); 
         return;
     }
-    
-    scanCanvas.width = 400; scanCanvas.height = 120;
-    // ดึงภาพจาก ROI โดยตรง ไม่ใช้ Loop แก้สีเพื่อลดภาระ CPU
-    scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120); [cite: 69]
 
-    const { data: { text } } = await worker.recognize(scanCanvas); [cite: 73]
-    const clean = text.trim();
+    // กำหนดพื้นที่สแกน (ROI)
+    scanCanvas.width = 400; scanCanvas.height = 120;
+    scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
+
+    // สแกนภาพสด (ไม่แต่งภาพ เพื่อให้ไวแบบไฟล์ 4)
+    const { data: { text } } = await worker.recognize(scanCanvas);
+    const clean = text.replace(/[^0-9-]/g, '').trim();
     
     if (clean.length >= 7) {
-        // ใช้ Logic การค้นหาที่เรียบง่ายเพื่อความรวดเร็ว
-        const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base)); [cite: 74]
-        
+        const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
         if (found.length > 0) {
-            locked = true; [cite: 75]
-            document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ</div>` + found.map((item, idx) => assetToHTML(item, idx)).join(""); [cite: 76]
-            document.getElementById("btnUnlock").style.display = "block"; [cite: 76]
-            document.getElementById("ding").play().catch(()=>{}); [cite: 76]
-            setTimeout(doScan, 1000); 
+            locked = true;
+            document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ</div>` + found.map((item, idx) => assetToHTML(item, idx)).join("");
+            document.getElementById("btnUnlock").style.display = "flex";
+            document.getElementById("ding").play().catch(()=>{});
             return;
         }
     }
-    setTimeout(doScan, 400); // วนรอบสแกนถัดไป
+    setTimeout(doScan, 400); // สแกนรอบถัดไป (0.4 วินาที)
   };
-  doScan(); [cite: 77]
+  
+  doScan();
 }
 
 document.getElementById("btnUnlock").onclick = () => { 
     locked = false; 
     document.getElementById("btnUnlock").style.display = "none"; 
     document.getElementById("overlay").innerHTML = "รอสแกนรหัสสินทรัพย์..."; 
-}; [cite: 78]
+};
 
 document.getElementById("btnToggleTorch").onclick = async () => { 
     if (track) {
-        const currentTorch = track.getSettings().torch;
-        await track.applyConstraints({ advanced: [{ torch: !currentTorch }] }); 
+        const current = track.getSettings().torch;
+        await track.applyConstraints({ advanced: [{ torch: !current }] }); 
     }
-}; [cite: 79]
+};
 
 init();
 </script>
