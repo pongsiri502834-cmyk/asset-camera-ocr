@@ -3,14 +3,19 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Asset Scanner Full Detail</title>
+<title>Asset Scanner Pro - Multi-Photo Support</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
-  :root { --accent:#00ff88; }
+  :root { --accent:#00ff88; --error:#ff4444; }
   body { margin:0; font-family:Arial, sans-serif; background:#000; color:#fff; overflow: hidden; }
   video { width:100vw; height:100vh; object-fit:cover; display:block; }
-  #status { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(0,0,0,0.8); padding:10px; font-size:14px; text-align:center; border-bottom: 1px solid var(--accent); }
+  
+  #status { 
+    position:fixed; top:0; left:0; right:0; z-index:20; 
+    background:rgba(0,0,0,0.8); padding:10px; font-size:14px; 
+    text-align:center; border-bottom: 1px solid var(--accent); 
+  }
   
   #overlay { 
     position:fixed; bottom:0; left:0; right:0; z-index:10; 
@@ -33,7 +38,7 @@
 
   .item-card { margin-bottom:12px; padding:15px; background:rgba(255,255,255,0.1); border-radius:12px; border-left: 5px solid var(--accent); font-size: 14px; line-height: 1.6; }
   .btn-grid { display: flex; gap: 8px; margin-top: 12px; }
-  .btn-action { flex: 1; text-align:center; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; text-decoration:none; border:none; color: #fff; font-size: 14px; }
+  .btn-action { flex: 1; text-align:center; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; text-decoration:none; border:none; color: #fff; font-size: 14px; transition: 0.3s; }
   .btn-drive { background: #007bff; }
   .btn-edit { background: #555; }
   b { color: var(--accent); }
@@ -44,7 +49,7 @@
 <div id="status">⏳ กำลังเตรียมระบบ...</div>
 <div id="toolbar">
     <button id="btnToggleTorch" class="btn-circle">🔦</button>
-    <button id="btnUnlock" class="btn-circle" style="display:none; border-color:#ff4444;">🔁</button>
+    <button id="btnUnlock" class="btn-circle" style="display:none; border-color:var(--error);">🔁</button>
 </div>
 
 <video id="video" autoplay playsinline></video>
@@ -54,13 +59,14 @@
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// --- CONFIG (เช็ค URL ของคุณให้ถูกต้อง) ---
+// --- CONFIG ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
 
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
+// 1. โหลดข้อมูลจาก Google Sheets
 async function loadData() {
   try {
     const res = await fetch(SHEET_URL);
@@ -82,10 +88,16 @@ async function loadData() {
   }
 }
 
+// 2. ฟังก์ชันอัปโหลดรูป (ถ่ายได้หลายครั้ง)
 async function handleFileUpload(input, assetCode) {
   if (!input.files || !input.files[0]) return;
+  
   const btn = input.closest('.item-card').querySelector(".btn-drive");
-  btn.disabled = true; btn.innerText = "⏳ กำลังส่ง...";
+  const originalText = "📸 ถ่ายรูป";
+  
+  btn.disabled = true; 
+  btn.innerText = "⏳ กำลังส่ง...";
+  btn.style.opacity = "0.7";
 
   const reader = new FileReader();
   reader.onload = async (e) => {
@@ -95,17 +107,32 @@ async function handleFileUpload(input, assetCode) {
         body: JSON.stringify({
           image: e.target.result, 
           folderName: assetCode.split('-')[0], 
-          fileName: assetCode + "_" + Date.now() + ".jpg"
+          fileName: `${assetCode}_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`
         })
       });
-      btn.innerText = "✅ สำเร็จ"; btn.style.background = "#28a745";
+
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.style.background = "#28a745";
+      btn.innerText = "✅ ส่งแล้ว (ถ่ายเพิ่มได้)";
+      input.value = ""; // ล้างค่าเพื่อให้เลือกซ้ำได้
+
+      setTimeout(() => {
+        btn.innerText = originalText;
+        btn.style.background = "#007bff";
+      }, 2500);
+
     } catch (err) {
-      btn.disabled = false; btn.innerText = "📸 ลองใหม่";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.innerText = "❌ ลองใหม่";
+      btn.style.background = "#dc3545";
     }
   };
   reader.readAsDataURL(input.files[0]);
 }
 
+// 3. แปลงข้อมูลเป็น Card HTML
 function assetToHTML(a, index) {
   const uId = "idx-" + index;
   const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
@@ -126,6 +153,7 @@ function assetToHTML(a, index) {
     </div>`;
 }
 
+// 4. ระบบ Scan Engine
 async function init() {
   await loadData();
   const videoEl = document.getElementById("video");
@@ -141,7 +169,6 @@ async function init() {
     return;
   }
 
-  // สร้าง Worker ครั้งเดียว
   worker = await Tesseract.createWorker("eng", 1);
   await worker.setParameters({ tessedit_char_whitelist: "0123456789-" });
 
@@ -149,49 +176,51 @@ async function init() {
   const scanCtx = scanCanvas.getContext("2d");
 
   const doScan = async () => {
-    // ถ้า locked อยู่ ให้ข้ามการประมวลผล OCR แต่ยังคงรัน Loop ต่อไป
-    if (!locked && videoEl.readyState === 4) {
-      scanCanvas.width = 400; scanCanvas.height = 120;
-      scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
-
-      const { data: { text } } = await worker.recognize(scanCanvas);
-      const clean = text.replace(/[^0-9-]/g, '').trim();
-      
-      if (clean.length >= 7) {
-        const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
-        if (found.length > 0) {
-          locked = true; 
-          document.getElementById("overlay").innerHTML = 
-            `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent); border-bottom:1px dashed var(--accent); padding-bottom:5px;">✅ พบข้อมูล ${found.length} รายการ</div>` + 
-            found.map((item, idx) => assetToHTML(item, idx)).join("");
-          
-          document.getElementById("btnUnlock").style.display = "flex";
-          document.getElementById("ding").play().catch(()=>{});
-        }
-      }
+    // ถ้ายังไม่ปลดล็อค หรือกล้องไม่พร้อม ให้รอรอบถัดไป (Loop ไม่หลุด)
+    if (locked || videoEl.readyState < 2) {
+        setTimeout(doScan, 500); 
+        return;
     }
-    // สั่งรันรอบถัดไปเสมอ ไม่ว่าผลลัพธ์จะเป็นอย่างไร
+
+    scanCanvas.width = 400; scanCanvas.height = 120;
+    scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
+
+    try {
+        const { data: { text } } = await worker.recognize(scanCanvas);
+        const clean = text.replace(/[^0-9-]/g, '').trim();
+        
+        if (clean.length >= 7) {
+            const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
+            if (found.length > 0) {
+                locked = true; 
+                document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ</div>` + found.map((item, idx) => assetToHTML(item, idx)).join("");
+                document.getElementById("btnUnlock").style.display = "flex";
+                document.getElementById("ding").play().catch(()=>{});
+            }
+        }
+    } catch (e) { console.error(e); }
+    
     setTimeout(doScan, 500); 
   };
   
   doScan();
 }
 
-// แก้ไขฟังก์ชัน Unlock ให้ Reset ค่าได้สะอาดที่สุด
+// ปุ่มสแกนใหม่ (Unlock)
 document.getElementById("btnUnlock").onclick = () => { 
-  locked = false; 
-  document.getElementById("btnUnlock").style.display = "none"; 
-  document.getElementById("overlay").innerHTML = "รอสแกนรหัสสินทรัพย์..."; 
-  document.getElementById("status").innerText = `✅ พร้อมสแกนใหม่ (${ASSETS_DATA.length} รายการ)`;
+    locked = false; 
+    document.getElementById("btnUnlock").style.display = "none"; 
+    document.getElementById("overlay").innerHTML = "รอสแกนรหัสสินทรัพย์..."; 
 };
 
+// เปิด-ปิดไฟฉาย
 document.getElementById("btnToggleTorch").onclick = async () => { 
-  if (track) {
-    try {
-      const current = track.getSettings().torch;
-      await track.applyConstraints({ advanced: [{ torch: !current }] }); 
-    } catch(e) { console.warn("Torch not supported"); }
-  }
+    if (track) {
+        try {
+            const current = track.getSettings().torch;
+            await track.applyConstraints({ advanced: [{ torch: !current }] }); 
+        } catch(e) { alert("อุปกรณ์นี้ไม่รองรับไฟฉาย"); }
+    }
 };
 
 init();
