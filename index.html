@@ -1,76 +1,78 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Asset Scanner Full Detail</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Asset Scanner Full Detail</title>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min src="https://cdn.jsdelivr.net/npm/papaparse@5.4.in.js
 
-<style>
-:root { --accent:#00ff88; }
-body { margin:0; font-family:Arial,sans-serif; background:#000; color:#fff; overflow:hidden; }
-video { width:100vw; height:100vh; object-fit:cover; display:block; }
+  <style>
+    :root { --accent:#00ff88; }
+    body { margin:0; font-family:Arial,sans-serif; background:#000; color:#fff; overflow:hidden; }
+    video { width:100vw; height:100vh; object-fit:cover; display:block; }
 
-#status {
-  position:fixed; top:0; left:0; right:0; z-index:20;
-  background:rgba(0,0,0,0.8); padding:10px;
-  font-size:14px; text-align:center;
-  border-bottom:1px solid var(--accent);
-}
+    #status {
+      position:fixed; top:0; left:0; right:0; z-index:20;
+      background:rgba(0,0,0,0.8); padding:10px;
+      font-size:14px; text-align:center;
+      border-bottom:1px solid var(--accent);
+    }
 
-#toolbar {
-  position:fixed; top:50px; right:10px; z-index:11;
-  display:flex; flex-direction:column; gap:10px;
-}
+    #toolbar {
+      position:fixed; top:50px; right:10px; z-index:11;
+      display:flex; flex-direction:column; gap:10px;
+    }
 
-.btn-circle {
-  width:50px; height:50px; border-radius:50%;
-  border:1px solid var(--accent);
-  background:rgba(0,0,0,0.6);
-  color:#fff; font-size:20px;
-  display:flex; align-items:center; justify-content:center;
-}
+    .btn-circle {
+      width:50px; height:50px; border-radius:50%;
+      border:1px solid var(--accent);
+      background:rgba(0,0,0,0.6);
+      color:#fff; font-size:20px;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer;
+    }
 
-#overlay {
-  position:fixed; bottom:0; left:0; right:0; z-index:10;
-  background:rgba(0,0,0,0.9); padding:15px;
-  max-height:50vh; overflow-y:auto;
-  border-top:2px solid var(--accent);
-  backdrop-filter:blur(10px);
-  border-radius:20px 20px 0 0;
-}
+    #overlay {
+      position:fixed; bottom:0; left:0; right:0; z-index:10;
+      background:rgba(0,0,0,0.9); padding:15px;
+      max-height:50vh; overflow-y:auto;
+      border-top:2px solid var(--accent);
+      backdrop-filter:blur(10px);
+      border-radius:20px 20px 0 0;
+    }
 
-.roi {
-  position:fixed; inset:0; pointer-events:none; z-index:5;
-  width:75vw; height:18vh; top:40%;
-  transform:translateY(-50%);
-  margin:auto;
-  border:2px solid var(--accent);
-  border-radius:12px;
-  box-shadow:0 0 0 9999px rgba(0,0,0,0.4);
-}
+    .roi {
+      position:fixed; inset:0; pointer-events:none; z-index:5;
+      width:75vw; height:18vh; top:40%;
+      transform:translateY(-50%);
+      margin:auto;
+      border:2px solid var(--accent);
+      border-radius:12px;
+      box-shadow:0 0 0 9999px rgba(0,0,0,0.4);
+    }
 
-.item-card {
-  margin-bottom:12px; padding:15px;
-  background:rgba(255,255,255,0.1);
-  border-radius:12px;
-  border-left:5px solid var(--accent);
-  font-size:14px; line-height:1.6;
-}
+    .item-card {
+      margin-bottom:12px; padding:15px;
+      background:rgba(255,255,255,0.1);
+      border-radius:12px;
+      border-left:5px solid var(--accent);
+      font-size:14px; line-height:1.6;
+    }
 
-.btn-grid { display:flex; gap:8px; margin-top:12px; }
-.btn-action {
-  flex:1; padding:12px; border-radius:8px;
-  font-weight:bold; cursor:pointer;
-  border:none; color:#fff; font-size:14px;
-}
-.btn-drive { background:#007bff; }
-.btn-edit { background:#555; }
+    .btn-grid { display:flex; gap:8px; margin-top:12px; }
+    .btn-action {
+      flex:1; padding:12px; border-radius:8px;
+      font-weight:bold; cursor:pointer;
+      border:none; color:#fff; font-size:14px;
+      text-align:center;
+    }
+    .btn-drive { background:#007bff; }
+    .btn-edit { background:#555; }
 
-b { color:var(--accent); }
-</style>
+    b { color:var(--accent); }
+  </style>
 </head>
 
 <body>
@@ -87,27 +89,29 @@ b { color:var(--accent); }
 <div id="overlay">รอสแกนรหัสสินทรัพย์...</div>
 
 <audio id="ding">
-  <source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3">
+  <source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples.mp3
 </audio>
 
 <script>
-// ================= CONFIG =================
+/* ================= CONFIG ================= */
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
 
 let ASSETS_DATA = [];
 let locked = false;
-let track = null;
-let worker = null;
 let scanning = false;
 let lastText = "";
+let track = null;
+let worker = null;
+let scanLoop = null;
 
-// ================= LOAD DATA =================
+/* ================= LOAD DATA ================= */
 async function loadData() {
   const res = await fetch(SHEET_URL);
   const text = await res.text();
   const parsed = Papa.parse(text, { skipEmptyLines:true });
+
   ASSETS_DATA = parsed.data.slice(1).map(r => ({
     code:(r[COL.CODE]||"").trim(),
     base:(r[COL.CODE]||"").split("-")[0],
@@ -118,15 +122,16 @@ async function loadData() {
     keeper:(r[COL.KEEPER]||"").trim(),
     status:(r[COL.STATUS]||"").trim()
   }));
+
   document.getElementById("status").innerText =
     `✅ พร้อมใช้งาน (${ASSETS_DATA.length} รายการ)`;
 }
 
-// ================= UI =================
+/* ================= UI ================= */
 function assetToHTML(a,i){
   const u = "idx"+i;
-  const form =
-  `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
+  const formUrl =
+    `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
 
   return `
   <div class="item-card">
@@ -138,17 +143,19 @@ function assetToHTML(a,i){
     <b>มูลค่า:</b> ${a.price} | <b>บัญชี:</b> ${a.book}
 
     <input id="file-${u}" type="file" accept="image/*" capture="environment"
-     style="display:none" onchange="handleFileUpload(this,'${a.code}')">
+      style="display:none" onchange="handleFileUpload(this,'${a.code}')">
 
     <div class="btn-grid">
       <button class="btn-action btn-drive"
-       onclick="document.getElementById('file-${u}').click()">📸 ถ่ายรูป</button>
-      <a class="btn-action btn-edit" target="_blank" href="${form}ndleFileUpload(input, code){
+        onclick="document.getElementById('file-${u}').click()">📸 ถ่ายรูป</button>
+      <a class="btn-action btn-edit" target="_blank" href="${formUrl}======== FILE UPLOAD ================= */
+function handleFileUpload(input, code){
   if(!input.files[0]) return;
   const reader=new FileReader();
-  reader.onload=()=> {
+  reader.onload=()=>{
     fetch(APPS_SCRIPT_URL,{
-      method:"POST",mode:"no-cors",
+      method:"POST",
+      mode:"no-cors",
       body:JSON.stringify({
         image:reader.result,
         folderName:code.split("-")[0],
@@ -159,7 +166,7 @@ function assetToHTML(a,i){
   reader.readAsDataURL(input.files[0]);
 }
 
-// ================= MAIN =================
+/* ================= MAIN ================= */
 async function init(){
   await loadData();
 
@@ -182,59 +189,76 @@ async function init(){
   canvas.width=320; canvas.height=80;
   const ctx=canvas.getContext("2d");
 
-  const scan=async()=> {
-    if(locked||scanning||video.readyState<2){
-      requestAnimationFrame(scan); return;
+  scanLoop = async function scan() {
+    if (locked || scanning || video.readyState < 2) {
+      requestAnimationFrame(scanLoop);
+      return;
     }
-    scanning=true;
 
-    ctx.drawImage(
-      video,
-      video.videoWidth*0.15,
-      video.videoHeight*0.42,
-      video.videoWidth*0.7,
-      video.videoHeight*0.16,
-      0,0,canvas.width,canvas.height
-    );
+    scanning = true;
 
-    const {data:{text}}=await worker.recognize(canvas);
-    const clean=text.replace(/[^0-9-]/g,"").trim();
-
-    if(clean && clean!==lastText && clean.length>=6){
-      lastText=clean;
-      const found=ASSETS_DATA.filter(a =>
-        a.code.includes(clean)||clean.includes(a.base)
+    try {
+      ctx.drawImage(
+        video,
+        video.videoWidth*0.15,
+        video.videoHeight*0.42,
+        video.videoWidth*0.70,
+        video.videoHeight*0.16,
+        0, 0, canvas.width, canvas.height
       );
 
-      if(found.length){
-        locked=true;
-        document.getElementById("overlay").innerHTML=
-          `<b style="color:var(--accent)">✅ พบ ${found.length} รายการ</b><br>`+
-          found.map(assetToHTML).join("");
-        document.getElementById("btnUnlock").style.display="flex";
-        document.getElementById("ding").play().catch(()=>{});
+      const { data:{ text } } = await worker.recognize(canvas);
+      const clean = text.replace(/[^0-9-]/g,"").trim();
+
+      if (clean && clean !== lastText && clean.length >= 6) {
+        lastText = clean;
+
+        const found = ASSETS_DATA.filter(a =>
+          a.code.includes(clean) || clean.includes(a.base)
+        );
+
+        if (found.length) {
+          locked = true;
+          document.getElementById("overlay").innerHTML =
+            `<b style="color:var(--accent)">✅ พบ ${found.length} รายการ</b><br>` +
+            found.map(assetToHTML).join("");
+
+          document.getElementById("btnUnlock").style.display = "flex";
+          document.getElementById("ding").play().catch(()=>{});
+        }
+      }
+    } finally {
+      scanning = false;
+      if (!locked) {
+        requestAnimationFrame(scanLoop);
       }
     }
-    scanning=false;
-    requestAnimationFrame(scan);
   };
-  scan();
+
+  scanLoop();
 }
 
-document.getElementById("btnUnlock").onclick=()=>{
-  locked=false; lastText="";
-  document.getElementById("overlay").innerText="รอสแกนรหัสสินทรัพย์...";
-  document.getElementById("btnUnlock").style.display="none";
+/* ================= CONTROLS ================= */
+document.getElementById("btnUnlock").onclick = () => {
+  locked = false;
+  scanning = false;
+  lastText = "";
+
+  document.getElementById("overlay").innerText = "รอสแกนรหัสสินทรัพย์...";
+  document.getElementById("btnUnlock").style.display = "none";
+
+  requestAnimationFrame(scanLoop);
 };
 
-document.getElementById("btnToggleTorch").onclick=async()=>{
-  if(track){
-    const s=track.getSettings().torch;
-    await track.applyConstraints({advanced:[{torch:!s}]});
+document.getElementById("btnToggleTorch").onclick = async () => {
+  if (track) {
+    const t = track.getSettings().torch;
+    await track.applyConstraints({ advanced:[{ torch: !t }] });
   }
 };
 
 init();
 </script>
+
 </body>
 </html>
