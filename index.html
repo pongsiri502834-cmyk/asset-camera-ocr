@@ -2,83 +2,63 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Asset Scanner</title>
 
-<!-- ✅ External Libraries -->
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/distn.js</script>
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
 <style>
 :root { --accent:#00ff88; }
-body { margin:0; background:#000; color:#fff; font-family:Arial,sans-serif; overflow:hidden; }
-video { width:100vw; height:100vh; object-fit:cover; }
-#status {
-  position:fixed; top:0; left:0; right:0; z-index:10;
-  background:#000; padding:8px; font-size:14px;
-  border-bottom:1px solid var(--accent); text-align:center;
-}
-#overlay {
-  position:fixed; bottom:0; left:0; right:0;
-  background:rgba(0,0,0,.9); padding:15px;
-  max-height:50vh; overflow:auto;
-  border-top:2px solid var(--accent);
-}
-#toolbar {
-  position:fixed; top:50px; right:10px; z-index:15;
-  display:flex; flex-direction:column; gap:10px;
-}
-.btn-circle {
-  width:48px; height:48px; border-radius:50%;
-  border:1px solid var(--accent);
-  background:#000a; color:#fff; font-size:20px;
-}
-.roi {
-  position:fixed; top:40%; left:50%;
-  width:75vw; height:18vh; transform:translate(-50%,-50%);
-  border:2px solid var(--accent);
-  box-shadow:0 0 0 9999px rgba(0,0,0,.5);
-}
-.item-card {
-  background:rgba(255,255,255,.1);
-  padding:12px; margin-bottom:10px;
-  border-left:4px solid var(--accent); border-radius:8px;
-}
-.btn-grid { display:flex; gap:8px; margin-top:10px; }
-.btn-action { flex:1; padding:10px; border:none; border-radius:6px; color:#fff; }
-.btn-drive { background:#007bff; }
-.btn-edit { background:#666; text-decoration:none; text-align:center; }
-b { color:var(--accent); }
+body{margin:0;background:#000;color:#fff;font-family:Arial,sans-serif;overflow:hidden}
+video{width:100vw;height:100vh;object-fit:cover}
+#status{position:fixed;top:0;left:0;right:0;padding:8px;background:#000;z-index:10;border-bottom:1px solid var(--accent);text-align:center}
+#overlay{position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,.9);padding:15px;border-top:2px solid var(--accent)}
+#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:20;background:#000}
+#start button{font-size:20px;padding:14px 30px;border-radius:10px;border:0;background:var(--accent);color:#000;font-weight:bold}
+#toolbar{position:fixed;top:55px;right:10px;z-index:15;display:flex;flex-direction:column;gap:10px}
+.btn-circle{width:48px;height:48px;border-radius:50%;border:1px solid var(--accent);background:#000;color:#fff;font-size:20px}
+.roi{position:fixed;top:40%;left:50%;width:75vw;height:18vh;transform:translate(-50%,-50%);border:2px solid var(--accent);box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+.item-card{background:rgba(255,255,255,.1);padding:12px;margin-bottom:10px;border-left:4px solid var(--accent);border-radius:8px}
+b{color:var(--accent)}
 </style>
 </head>
 
 <body>
 
-<div id="status">⏳ กำลังเริ่มระบบ...</div>
+<div id="start">
+  <button id="btnStart">▶ เริ่มใช้งานกล้อง</button>
+</div>
+
+<div id="status">⏳ รอเริ่มระบบ...</div>
 
 <div id="toolbar">
   <button id="btnTorch" class="btn-circle">🔦</button>
   <button id="btnReset" class="btn-circle" style="display:none;border-color:red">🔁</button>
 </div>
 
-<video id="video" autoplay playsinline></video>
+<video id="video" playsinline></video>
 <div class="roi"></div>
-<div id="overlay">รอสแกนรหัสสินทรัพย์…</div>
+<div id="overlay">รอสแกนรหัสสินทรัพย์...</div>
 
 <audio id="ding">
   <source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3">
 </audio>
 
 <script>
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?output=csv";
-const COL = { CODE:1, DETAIL:3 };
+const SHEET_URL="https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?output=csv";
+const COL={CODE:1,DETAIL:3};
 
-let assets=[], locked=false, scanning=false, last="", track, worker, loopFn;
+let assets=[],locked=false,scanning=false,last="",track,worker,scanLoop;
 
 async function loadData(){
-  const csv = await (await fetch(SHEET_URL)).text();
-  const rows = Papa.parse(csv).data.slice(1);
-  assets = rows.map(r=>({ code:r[COL.CODE], detail:r[COL.DETAIL], base:(r[COL.CODE]||"").split("-")[0] }));
+  const csv=await(await fetch(SHEET_URL)).text();
+  assets=Papa.parse(csv).data.slice(1).map(r=>({
+    code:(r[COL.CODE]||"").trim(),
+    detail:(r[COL.DETAIL]||"").trim(),
+    base:(r[COL.CODE]||"").split("-")[0]
+  }));
   status.innerText=`✅ พร้อมใช้งาน (${assets.length})`;
 }
 
@@ -86,15 +66,18 @@ function render(a){
   return `<div class="item-card"><b>${a.code}</b><br>${a.detail}</div>`;
 }
 
-async function init(){
+async function startCamera(){
+  document.getElementById("start").style.display="none";
+
   await loadData();
 
-  const video = document.getElementById("video");
-  const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"environment" }});
-  video.srcObject = stream;
-  track = stream.getVideoTracks()[0];
+  const video=document.getElementById("video");
+  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+  video.srcObject=stream;
+  video.play();
+  track=stream.getVideoTracks()[0];
 
-  worker = await Tesseract.createWorker();
+  worker=await Tesseract.createWorker({logger:()=>{}});
   await worker.loadLanguage("eng");
   await worker.initialize("eng");
   await worker.setParameters({
@@ -102,22 +85,21 @@ async function init(){
     tessedit_pageseg_mode:Tesseract.PSM.SINGLE_LINE
   });
 
-  const cvs=document.createElement("canvas");
-  cvs.width=320; cvs.height=80;
-  const ctx=cvs.getContext("2d");
+  const canvas=document.createElement("canvas");
+  canvas.width=320;canvas.height=80;
+  const ctx=canvas.getContext("2d");
 
-  loopFn = async function scan(){
+  scanLoop=async function(){
     if(locked||scanning||video.readyState<2){
-      requestAnimationFrame(loopFn); return;
+      requestAnimationFrame(scanLoop);return;
     }
     scanning=true;
     try{
-      ctx.drawImage(video, video.videoWidth*0.15, video.videoHeight*0.42,
-        video.videoWidth*0.7, video.videoHeight*0.16, 0,0,cvs.width,cvs.height);
-
-      const {data:{text}} = await worker.recognize(cvs);
+      ctx.drawImage(video,video.videoWidth*0.15,video.videoHeight*0.42,
+        video.videoWidth*0.7,video.videoHeight*0.16,0,0,320,80);
+      const {data:{text}}=await worker.recognize(canvas);
       const clean=text.replace(/[^0-9-]/g,"");
-      if(clean && clean!==last){
+      if(clean&&clean!==last){
         last=clean;
         const found=assets.filter(a=>a.code.includes(clean)||clean.includes(a.base));
         if(found.length){
@@ -127,19 +109,21 @@ async function init(){
           ding.play();
         }
       }
-    } finally {
+    }finally{
       scanning=false;
-      if(!locked) requestAnimationFrame(loopFn);
+      if(!locked)requestAnimationFrame(scanLoop);
     }
   };
-  loopFn();
+  scanLoop();
 }
 
+btnStart.onclick=startCamera;
+
 btnReset.onclick=()=>{
-  locked=false; scanning=false; last="";
-  overlay.innerText="รอสแกนรหัสสินทรัพย์…";
+  locked=false;scanning=false;last="";
+  overlay.innerText="รอสแกนรหัสสินทรัพย์...";
   btnReset.style.display="none";
-  requestAnimationFrame(loopFn);
+  requestAnimationFrame(scanLoop);
 };
 
 btnTorch.onclick=async()=>{
@@ -148,9 +132,6 @@ btnTorch.onclick=async()=>{
     await track.applyConstraints({advanced:[{torch:!t}]});
   }
 };
-
-init();
 </script>
 </body>
 </html>
-``
