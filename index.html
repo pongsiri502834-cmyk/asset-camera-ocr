@@ -54,7 +54,7 @@
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// --- CONFIG ---
+// --- CONFIG (เช็ค URL ของคุณให้ถูกต้อง) ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
@@ -126,7 +126,6 @@ function assetToHTML(a, index) {
     </div>`;
 }
 
-// --- แก้ไขส่วน Main Engine ---
 async function init() {
   await loadData();
   const videoEl = document.getElementById("video");
@@ -142,6 +141,7 @@ async function init() {
     return;
   }
 
+  // สร้าง Worker ครั้งเดียว
   worker = await Tesseract.createWorker("eng", 1);
   await worker.setParameters({ tessedit_char_whitelist: "0123456789-" });
 
@@ -149,54 +149,49 @@ async function init() {
   const scanCtx = scanCanvas.getContext("2d");
 
   const doScan = async () => {
-    // หัวใจหลัก: แม้จะ locked หรือวีดีโอไม่พร้อม เรายังต้องสั่ง setTimeout เพื่อรอรอบถัดไป
-    if (locked || videoEl.readyState < 2) {
-        setTimeout(doScan, 500); 
-        return;
-    }
+    // ถ้า locked อยู่ ให้ข้ามการประมวลผล OCR แต่ยังคงรัน Loop ต่อไป
+    if (!locked && videoEl.readyState === 4) {
+      scanCanvas.width = 400; scanCanvas.height = 120;
+      scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
 
-    scanCanvas.width = 400; scanCanvas.height = 120;
-    // ปรับ Crop ROI ให้แม่นยำขึ้น
-    scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
-
-    try {
-        const { data: { text } } = await worker.recognize(scanCanvas);
-        const clean = text.replace(/[^0-9-]/g, '').trim();
-        
-        if (clean.length >= 7) {
-            const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
-            if (found.length > 0) {
-                locked = true; // ล็อคการสแกนเพื่อแสดงผล
-                document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ</div>` + found.map((item, idx) => assetToHTML(item, idx)).join("");
-                document.getElementById("btnUnlock").style.display = "flex";
-                document.getElementById("ding").play().catch(()=>{});
-            }
+      const { data: { text } } = await worker.recognize(scanCanvas);
+      const clean = text.replace(/[^0-9-]/g, '').trim();
+      
+      if (clean.length >= 7) {
+        const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
+        if (found.length > 0) {
+          locked = true; 
+          document.getElementById("overlay").innerHTML = 
+            `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent); border-bottom:1px dashed var(--accent); padding-bottom:5px;">✅ พบข้อมูล ${found.length} รายการ</div>` + 
+            found.map((item, idx) => assetToHTML(item, idx)).join("");
+          
+          document.getElementById("btnUnlock").style.display = "flex";
+          document.getElementById("ding").play().catch(()=>{});
         }
-    } catch (e) {
-        console.error("OCR Error:", e);
+      }
     }
-    
-    // วนรอบใหม่เสมอ
+    // สั่งรันรอบถัดไปเสมอ ไม่ว่าผลลัพธ์จะเป็นอย่างไร
     setTimeout(doScan, 500); 
   };
   
   doScan();
 }
 
-// ปุ่มสแกนใหม่ (Unlock)
+// แก้ไขฟังก์ชัน Unlock ให้ Reset ค่าได้สะอาดที่สุด
 document.getElementById("btnUnlock").onclick = () => { 
-    locked = false; 
-    document.getElementById("btnUnlock").style.display = "none"; 
-    document.getElementById("overlay").innerHTML = "รอสแกนรหัสสินทรัพย์..."; 
+  locked = false; 
+  document.getElementById("btnUnlock").style.display = "none"; 
+  document.getElementById("overlay").innerHTML = "รอสแกนรหัสสินทรัพย์..."; 
+  document.getElementById("status").innerText = `✅ พร้อมสแกนใหม่ (${ASSETS_DATA.length} รายการ)`;
 };
 
 document.getElementById("btnToggleTorch").onclick = async () => { 
-    if (track) {
-        try {
-            const current = track.getSettings().torch;
-            await track.applyConstraints({ advanced: [{ torch: !current }] }); 
-        } catch(e) { alert("อุปกรณ์นี้ไม่รองรับไฟฉาย"); }
-    }
+  if (track) {
+    try {
+      const current = track.getSettings().torch;
+      await track.applyConstraints({ advanced: [{ torch: !current }] }); 
+    } catch(e) { console.warn("Torch not supported"); }
+  }
 };
 
 init();
