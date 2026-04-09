@@ -54,14 +54,13 @@
 <audio id="ding"><source src="https://cdn.jsdelivr.net/gh/naptha/tesseract.js@master/docs/examples/data/confirm.mp3"></audio>
 
 <script>
-// --- CONFIG (ตรวจสอบคอลัมน์ให้ตรงกับ Google Sheets ของคุณ) ---
+// --- CONFIG ---
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4XjXwXlMzxjTf1YbTWD8DCTOic-yBMhQoimCeyI4D4lbjpFZMbYAtfB5eJZ-9mpiI/exec";
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQpXuB-T6npWk7MYedMvVFZCNghCnMg9Iu79j0KcMVreOMhksr6pLmOGpdGwfftRzRUMJGnPtr0H4wP/pub?gid=0&single=true&output=csv";
 const COL = { CODE:1, DETAIL:3, PRICE:8, BOOK:10, KEEPER:13, STATUS:11, NUMBER:6 };
 
 let ASSETS_DATA = [], locked = false, track = null, worker = null;
 
-// 1. LOAD DATA (ดึงข้อมูลกลับมาให้ครบทุกส่วน)
 async function loadData() {
   try {
     const res = await fetch(SHEET_URL);
@@ -83,7 +82,6 @@ async function loadData() {
   }
 }
 
-// 2. FILE UPLOAD
 async function handleFileUpload(input, assetCode) {
   if (!input.files || !input.files[0]) return;
   const btn = input.closest('.item-card').querySelector(".btn-drive");
@@ -108,7 +106,6 @@ async function handleFileUpload(input, assetCode) {
   reader.readAsDataURL(input.files[0]);
 }
 
-// แสดงข้อมูลรายละเอียดทั้งหมดกลับมา
 function assetToHTML(a, index) {
   const uId = "idx-" + index;
   const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSd2E7Rw0_BbJPL_BtZCaICXCXxLDMFYoa4IwpJCXnK2dxqDUw/viewform?usp=pp_url&entry.490555334=${encodeURIComponent(a.code)}`;
@@ -129,7 +126,7 @@ function assetToHTML(a, index) {
     </div>`;
 }
 
-// 3. MAIN SCANNER ENGINE
+// --- แก้ไขส่วน Main Engine ---
 async function init() {
   await loadData();
   const videoEl = document.getElementById("video");
@@ -152,33 +149,41 @@ async function init() {
   const scanCtx = scanCanvas.getContext("2d");
 
   const doScan = async () => {
+    // หัวใจหลัก: แม้จะ locked หรือวีดีโอไม่พร้อม เรายังต้องสั่ง setTimeout เพื่อรอรอบถัดไป
     if (locked || videoEl.readyState < 2) {
-        setTimeout(doScan, 400); 
+        setTimeout(doScan, 500); 
         return;
     }
 
     scanCanvas.width = 400; scanCanvas.height = 120;
+    // ปรับ Crop ROI ให้แม่นยำขึ้น
     scanCtx.drawImage(videoEl, videoEl.videoWidth*0.12, videoEl.videoHeight*0.38, videoEl.videoWidth*0.75, videoEl.videoHeight*0.25, 0, 0, 400, 120);
 
-    const { data: { text } } = await worker.recognize(scanCanvas);
-    const clean = text.replace(/[^0-9-]/g, '').trim();
-    
-    if (clean.length >= 7) {
-        const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
-        if (found.length > 0) {
-            locked = true;
-            document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ</div>` + found.map((item, idx) => assetToHTML(item, idx)).join("");
-            document.getElementById("btnUnlock").style.display = "flex";
-            document.getElementById("ding").play().catch(()=>{});
-            return;
+    try {
+        const { data: { text } } = await worker.recognize(scanCanvas);
+        const clean = text.replace(/[^0-9-]/g, '').trim();
+        
+        if (clean.length >= 7) {
+            const found = ASSETS_DATA.filter(a => a.code.includes(clean) || clean.includes(a.base));
+            if (found.length > 0) {
+                locked = true; // ล็อคการสแกนเพื่อแสดงผล
+                document.getElementById("overlay").innerHTML = `<div style="margin-bottom:10px; font-weight:bold; color:var(--accent)">✅ พบ ${found.length} รายการ</div>` + found.map((item, idx) => assetToHTML(item, idx)).join("");
+                document.getElementById("btnUnlock").style.display = "flex";
+                document.getElementById("ding").play().catch(()=>{});
+            }
         }
+    } catch (e) {
+        console.error("OCR Error:", e);
     }
-    setTimeout(doScan, 400); 
+    
+    // วนรอบใหม่เสมอ
+    setTimeout(doScan, 500); 
   };
   
   doScan();
 }
 
+// ปุ่มสแกนใหม่ (Unlock)
 document.getElementById("btnUnlock").onclick = () => { 
     locked = false; 
     document.getElementById("btnUnlock").style.display = "none"; 
@@ -187,8 +192,10 @@ document.getElementById("btnUnlock").onclick = () => {
 
 document.getElementById("btnToggleTorch").onclick = async () => { 
     if (track) {
-        const current = track.getSettings().torch;
-        await track.applyConstraints({ advanced: [{ torch: !current }] }); 
+        try {
+            const current = track.getSettings().torch;
+            await track.applyConstraints({ advanced: [{ torch: !current }] }); 
+        } catch(e) { alert("อุปกรณ์นี้ไม่รองรับไฟฉาย"); }
     }
 };
 
